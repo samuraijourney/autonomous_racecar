@@ -1,0 +1,12 @@
+<launch>
+
+    <!--
+      follow_offset: The x offset between the car and the clone
+      force_in_bounds: Whether or not bounds for the clone should be checked
+    -->
+
+   <!--
+	Launch a clone_follower node here
+   -->
+
+</launch>
