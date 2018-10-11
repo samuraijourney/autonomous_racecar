@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-import argparse
 import rospy
+import sys
 import numpy as np
 from geometry_msgs.msg import PoseStamped, Pose, Point
-import Utils # <----------- LOOK AT THESE FUNCTIONS ***************************
+from Utils import *
 
 SUB_TOPIC = '/sim_car_pose/pose' # The topic that provides the simulated car pose
 PUB_TOPIC = '/clone_follower_pose/pose' # The topic that you should publish to
@@ -30,7 +30,7 @@ class CloneFollower:
         
         # Setup subscriber that subscribes to SUB_TOPIC and uses the self.update_pose
         # callback
-        self.sub = rospy.Subsriber(SUB_TOPIC, PoseStamped, self.update_pose)
+        self.sub = rospy.Subscriber(SUB_TOPIC, PoseStamped, self.update_pose)
         
     '''
     Given the translation and rotation between the robot and map, computes the pose
@@ -39,14 +39,17 @@ class CloneFollower:
     In:
         trans: The translation between the robot and map
         rot: The rotation between the robot and map
+	offset_dir: The direction of the offset value
     Out:
         The pose of the clone
     '''
-    def compute_follow_pose(self, trans, rot):
-        offset_vector = [self.follow_offset, 0]
-        rot_matrix = rotation_matrix(rot)
-        offset_vector = np.matmul(rot_matrix, offset_vector)
-        final_position = trans + offset_vector
+    def compute_follow_pose(self, trans, rot, offset_dir):
+        offset_vector = np.array([self.follow_offset, 0])
+        rot_matrix = rotation_matrix(quaternion_to_angle(rot))
+	x = rot_matrix[0,0] * offset_vector[0] + rot_matrix[0,1] * offset_vector[1]
+	y = rot_matrix[1,0] * offset_vector[0] + rot_matrix[1,1] * offset_vector[1]
+        offset_vector = np.multiply(offset_dir, [x,y])
+        final_position = np.add([trans.x, trans.y], offset_vector)
         return Pose(Point(final_position[0], final_position[1], 0), rot)
         
     '''
@@ -59,14 +62,23 @@ class CloneFollower:
         # Compute the pose of the clone
         # Note: To convert from a message quaternion to corresponding rotation matrix,
         #       look at the functions in Utils.py
-        clone_pose = self.compute_follow_pose(msg.pose.position, -quaternion_to_angle(msg.pose.orientation))
+	
+        clone_pose = self.compute_follow_pose(msg.pose.position, msg.pose.orientation, -1.0)
 
         # Check bounds if required
         if self.force_in_bounds:
-            pixel_location = world_to_map(clone_pose, self.map_info)
+	    position = [clone_pose.position.x, clone_pose.position.y, 0]
+            pixel_location = world_to_map(position, self.map_info)
+	    if pixel_location[1] >= self.map_info.height:
+		pixel_location[1] = self.map_info.height - 1
+	    if pixel_location[0] >= self.map_info.width:
+		pixel_location[0] = self.map_info.width - 1
             if (self.map_img[pixel_location[1], pixel_location[0]] == 0):
-                clone_pose = self.compute_follow_pose(msg.pose.position, quaternion_to_angle(msg.pose.orientation))
-        
+                clone_pose = self.compute_follow_pose(msg.pose.position, msg.pose.orientation, 1.0)
+		rospy.loginfo("Reverse offset")
+            else:
+		rospy.loginfo("Normal offset")
+
         # Setup the out going PoseStamped message
         clone_poseStamped = PoseStamped(msg.header, clone_pose)
 
@@ -79,14 +91,12 @@ if __name__ == '__main__':
 
     rospy.init_node('clone_follower', anonymous=True) # Initialize the node
 
-    parser = argparse.ArgumentParser(description='Process follow parameters')
-    parser.add_argument('-o', '--follow_offset', help='The follow offset' type=float, dest='offset')
-    parser.add_argument('-f', '--force_in_bounds', help='Force in bounds', type=bool, dest='force')
-    args = parser.parse_args()
-
-    # Populate params with values passed by launch file
-    follow_offset = args.offset
-    force_in_bounds = args.force
+    if (len(sys.argv) - 1) < 2:
+	rospy.loginfo("Insufficient argument count, follow_offset and force_in_bounds required. Using default parameters of 1.0m and not forced in bounds")
+    else:
+	# Populate params with values passed by launch file
+	follow_offset = float(sys.argv[1])
+	force_in_bounds = bool(sys.argv[2])
 
     cf = CloneFollower(follow_offset, force_in_bounds) # Create a clone follower
     rospy.spin() # Spin
