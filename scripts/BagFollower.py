@@ -2,22 +2,40 @@
 
 import rospy
 import rosbag
+import sys
+import time
 from ackermann_msgs.msg import AckermannDriveStamped
 
-BAG_TOPIC = # Name of the topic that should be extracted from the bag
 PUB_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0'
-PUB_RATE = # The rate at which messages should be published
+BAG_TOPIC = PUB_TOPIC
+PUB_RATE_SLEEP = 1.0 / 30.0 # The rate at which messages should be published in Hz
 
 # Loads a bag file, reads the msgs from the specified topic, and republishes them
 def follow_bag(bag_path, follow_backwards=False):
-	pass
+    bag = rosbag.Bag(bag_path)
+    pub = rospy.Publisher(PUB_TOPIC, PoseStamped, queue_size=1)
+    
+    if follow_backwards == False:
+        for topic, msg, t in bag.read_messages(topics=[BAG_TOPIC]):
+            pub.publish(msg)
+            time.sleep(PUB_RATE_SLEEP)
+    else:
+        for topic, msg, t in reversed(bag.read_messages(topics=[BAG_TOPIC])):
+            pub.publish(msg)
+            time.sleep(PUB_RATE_SLEEP)
+
+    bag.close()
 
 if __name__ == '__main__':
 	bag_path = None # The file path to the bag file
 	follow_backwards = False # Whether or not the path should be followed backwards
-	
+
 	rospy.init_node('bag_follower', anonymous=True)
 	
-	# Populate param(s) with value(s) passed by launch file
-	
+    if (len(sys.argv) - 1) < 2:
+        rospy.loginfo("Insufficient argument count. Ros bag path and follow backwards parameters are needed. Exiting...")
+        sys.exit()
+    
+    bag_path = sys.argv[1]
+    follow_backwards = bool(sys.argv[2])
 	follow_bag(bag_path, follow_backwards)

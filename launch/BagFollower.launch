@@ -1,4 +1,10 @@
 <launch>
-		<!-- Launch a BagFollower node and pass any necessary parameters -->
-  
+
+    <!-- Launch a BagFollower node and pass any necessary parameters -->
+
+   <arg name="bag_path" default="" />
+   <arg name="follow_backwards" default="false" />
+
+   <node name="bag_follower" pkg="lab0" type="BagFollower.py" args="$(arg bag_path) $(arg follow_backwards)" respawn="true"/> 
+
 </launch>
