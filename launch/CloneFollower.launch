@@ -12,6 +12,6 @@
 	Launch a clone_follower node here
    -->
 
-   <node name="clone_follower" pkg="lab0" type="scripts/CloneFollower.py" args="-o $(arg follow_offset) -f $(arg force_in_bounds)" respawn="true"/> 
+   <node name="clone_follower" pkg="lab0" type="scripts/CloneFollower.py" args="$(arg follow_offset) $(arg force_in_bounds)" respawn="true"/> 
 
 </launch>
