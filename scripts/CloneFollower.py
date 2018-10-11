@@ -39,15 +39,15 @@ class CloneFollower:
     In:
         trans: The translation between the robot and map
         rot: The rotation between the robot and map
-	offset_dir: The direction of the offset value
+    offset_dir: The direction of the offset value
     Out:
         The pose of the clone
     '''
     def compute_follow_pose(self, trans, rot, offset_dir):
         offset_vector = np.array([self.follow_offset, 0])
         rot_matrix = rotation_matrix(quaternion_to_angle(rot))
-	    x = rot_matrix[0,0] * offset_vector[0] + rot_matrix[0,1] * offset_vector[1]
-	    y = rot_matrix[1,0] * offset_vector[0] + rot_matrix[1,1] * offset_vector[1]
+        x = rot_matrix[0,0] * offset_vector[0] + rot_matrix[0,1] * offset_vector[1]
+        y = rot_matrix[1,0] * offset_vector[0] + rot_matrix[1,1] * offset_vector[1]
         offset_vector = np.multiply(offset_dir, [x,y])
         final_position = np.add([trans.x, trans.y], offset_vector)
         return Pose(Point(final_position[0], final_position[1], 0), rot)
@@ -62,22 +62,22 @@ class CloneFollower:
         # Compute the pose of the clone
         # Note: To convert from a message quaternion to corresponding rotation matrix,
         #       look at the functions in Utils.py
-	
+    
         clone_pose = self.compute_follow_pose(msg.pose.position, msg.pose.orientation, -1.0)
 
         # Check bounds if required
         if self.force_in_bounds:
-	        position = [clone_pose.position.x, clone_pose.position.y, 0]
+            position = [clone_pose.position.x, clone_pose.position.y, 0]
             pixel_location = world_to_map(position, self.map_info)
-	    if pixel_location[1] >= self.map_info.height:
-		    pixel_location[1] = self.map_info.height - 1
-	    if pixel_location[0] >= self.map_info.width:
-		    pixel_location[0] = self.map_info.width - 1
+        if pixel_location[1] >= self.map_info.height:
+            pixel_location[1] = self.map_info.height - 1
+        if pixel_location[0] >= self.map_info.width:
+            pixel_location[0] = self.map_info.width - 1
         if (self.map_img[pixel_location[1], pixel_location[0]] == 0):
             clone_pose = self.compute_follow_pose(msg.pose.position, msg.pose.orientation, 1.0)
-		    rospy.loginfo("Reverse offset")
+            rospy.loginfo("Reverse offset")
         else:
-		    rospy.loginfo("Normal offset")
+            rospy.loginfo("Normal offset")
 
         # Setup the out going PoseStamped message
         clone_poseStamped = PoseStamped(msg.header, clone_pose)
@@ -92,7 +92,7 @@ if __name__ == '__main__':
     rospy.init_node('clone_follower', anonymous=True) # Initialize the node
 
     if (len(sys.argv) - 1) < 2:
-	    rospy.loginfo("Insufficient argument count, follow_offset and force_in_bounds required. Using default parameters of 1.0m and not forced in bounds")
+        rospy.loginfo("Insufficient argument count, follow_offset and force_in_bounds required. Using default parameters of 1.0m and not forced in bounds")
     else:
         # Populate params with values passed by launch file
         follow_offset = float(sys.argv[1])
