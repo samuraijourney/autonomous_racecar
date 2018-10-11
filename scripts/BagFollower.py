@@ -5,19 +5,15 @@ import rosbag
 import sys
 import time
 from ackermann_msgs.msg import AckermannDriveStamped
-from geometry_msgs.msg import PoseStamped
 
-#PUB_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0'
-#BAG_TOPIC = '/vesc/low_level/ackermann_cmd_mux/input/teleop'
-PUB_TOPIC = '/sim_car_pose/pose'
-BAG_TOPIC = '/sim_car_pose/pose'
+PUB_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0'
+BAG_TOPIC = '/vesc/low_level/ackermann_cmd_mux/input/teleop'
 PUB_RATE_SLEEP = 1.0 / 30.0 # The rate at which messages should be published in seconds
 
 # Loads a bag file, reads the msgs from the specified topic, and republishes them
 def follow_bag(bag_path, follow_backwards=False):
     bag = rosbag.Bag(bag_path)
-    pub = rospy.Publisher(PUB_TOPIC, PoseStamped, queue_size=1)
-    #pub = rospy.Publisher(PUB_TOPIC, AckermannDriveStamped, queue_size=1)
+    pub = rospy.Publisher(PUB_TOPIC, AckermannDriveStamped, queue_size=1)
     
     if follow_backwards is True:
 	msgs = []
