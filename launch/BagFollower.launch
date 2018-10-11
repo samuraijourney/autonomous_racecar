@@ -2,9 +2,9 @@
 
     <!-- Launch a BagFollower node and pass any necessary parameters -->
 
-   <arg name="bag_path" default="" />
-   <arg name="follow_backwards" default="false" />
+   <arg name="bag_path" default="$(find lab0)\recordings\simulation.bag" />
+   <arg name="follow_backwards" default="true" />
 
-   <node name="bag_follower" pkg="lab0" type="BagFollower.py" args="$(arg bag_path) $(arg follow_backwards)" respawn="true"/> 
+   <node name="bag_follower" pkg="lab0" type="BagFollower.py" args="$(arg bag_path) $(arg follow_backwards)"/> 
 
 </launch>

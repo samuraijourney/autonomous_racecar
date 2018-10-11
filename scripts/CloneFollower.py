@@ -69,15 +69,15 @@ class CloneFollower:
         if self.force_in_bounds:
             position = [clone_pose.position.x, clone_pose.position.y, 0]
             pixel_location = world_to_map(position, self.map_info)
-        if pixel_location[1] >= self.map_info.height:
-            pixel_location[1] = self.map_info.height - 1
-        if pixel_location[0] >= self.map_info.width:
-            pixel_location[0] = self.map_info.width - 1
-        if (self.map_img[pixel_location[1], pixel_location[0]] == 0):
-            clone_pose = self.compute_follow_pose(msg.pose.position, msg.pose.orientation, 1.0)
-            rospy.loginfo("Reverse offset")
-        else:
-            rospy.loginfo("Normal offset")
+            if pixel_location[1] >= self.map_info.height:
+                pixel_location[1] = self.map_info.height - 1
+            if pixel_location[0] >= self.map_info.width:
+                pixel_location[0] = self.map_info.width - 1
+            if (self.map_img[pixel_location[1], pixel_location[0]] == 0):
+                clone_pose = self.compute_follow_pose(msg.pose.position, msg.pose.orientation, 1.0)
+                rospy.loginfo("Reverse offset")
+            else:
+                rospy.loginfo("Normal offset")
 
         # Setup the out going PoseStamped message
         clone_poseStamped = PoseStamped(msg.header, clone_pose)
@@ -96,7 +96,7 @@ if __name__ == '__main__':
     else:
         # Populate params with values passed by launch file
         follow_offset = float(sys.argv[1])
-        force_in_bounds = bool(sys.argv[2])
+        force_in_bounds = sys.argv[2].lower() == 'true'
 
     cf = CloneFollower(follow_offset, force_in_bounds) # Create a clone follower
     rospy.spin() # Spin
