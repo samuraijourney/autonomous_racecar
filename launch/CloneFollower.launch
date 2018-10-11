@@ -5,8 +5,13 @@
       force_in_bounds: Whether or not bounds for the clone should be checked
     -->
 
+   <arg name="follow_offset" default="1.5" />
+   <arg name="force_in_bounds" default="true" />
+
    <!--
 	Launch a clone_follower node here
    -->
+
+   <node name="clone_follower" pkg="a0" type="CloneFollower.py" args="-offset $(arg follow_offset) -force_in_bounds $(arg force_in_bounds)" respawn="true"/> 
 
 </launch>
