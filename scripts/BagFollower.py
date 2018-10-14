@@ -8,7 +8,7 @@ from ackermann_msgs.msg import AckermannDriveStamped
 
 PUB_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0'
 BAG_TOPIC = '/vesc/low_level/ackermann_cmd_mux/input/teleop'
-PUB_RATE = 30 # The rate at which messages should be published in hz
+PUB_RATE = 20 # The rate at which messages should be published in hz
 
 # Loads a bag file, reads the msgs from the specified topic, and republishes them
 def follow_bag(bag_path, follow_backwards=False):
@@ -16,19 +16,12 @@ def follow_bag(bag_path, follow_backwards=False):
     pub = rospy.Publisher(PUB_TOPIC, AckermannDriveStamped, queue_size=10)
     rate = rospy.Rate(PUB_RATE)
 
-    if follow_backwards is True:
-        msgs = []
-        for topic, msg, t in bag.read_messages(topics=[BAG_TOPIC]):
-            msgs.append(msg)
- 
-        for msg in reversed(msgs):
-            pub.publish(msg)
-            rate.sleep()
-  
-    else:
-        for topic, msg, t in bag.read_messages(topics=[BAG_TOPIC]):
-            pub.publish(msg)
-            rate.sleep()
+    for topic, msg, t in bag.read_messages(topics=[BAG_TOPIC]):
+	if follow_backwards is True:
+	    msg.drive.speed *= -1
+	    msg.drive.steering_angle_velocity *= -1
+        pub.publish(msg)
+        rate.sleep()
 
     bag.close()
 
