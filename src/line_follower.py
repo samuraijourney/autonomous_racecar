@@ -103,7 +103,7 @@ class LineFollower:
         self.plan.pop(0)
       else:
         break
-    
+
     # Check if the plan is empty. If so, return (False, 0.0)
     # YOUR CODE HERE
     if len(self.plan) == 0:
@@ -131,7 +131,7 @@ class LineFollower:
     #   Be careful about the sign of the rotation error
     # YOUR CODE HERE
     q1 = utils.angle_to_quaternion(goal_pose[2])
-    q2 = utils.angle_to_quaternion(cur_pose[2]) 
+    q2 = utils.angle_to_quaternion(cur_pose[2])
     rotation_error = utils.angle_between_quaternions(q2, q1)
     print("Goal: " + str(goal_pose))
     print("Cur: " + str(cur_pose))
@@ -231,8 +231,6 @@ def main():
   kd = 0.0
   error_buff_length = 10
   speed = 1.0
-
-  raw_input("Press Enter to when plan available...")  # Waits for ENTER key press
 
   # Use rospy.wait_for_message to get the plan msg
   # Convert the plan msg to a list of 3-element numpy arrays
