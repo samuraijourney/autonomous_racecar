@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import collections
+import csv
 import sys
 
 import rospy
@@ -34,9 +35,10 @@ class LineFollower:
     kd: The derivative PID parameter
     error_buff_length: The length of the buffer that is storing past error values
     speed: The speed at which the robot should travel
+    error_save_path: Location to save error file
   '''
   def __init__(self, plan, pose_topic, plan_lookahead, translation_weight,
-               rotation_weight, kp, ki, kd, error_buff_length, speed):
+               rotation_weight, kp, ki, kd, error_buff_length, speed, error_save_path):
     # Store the passed parameters
     self.plan = plan
     self.plan_lookahead = plan_lookahead
@@ -52,7 +54,10 @@ class LineFollower:
     # https://docs.python.org/2/library/collections.html#collections.deque
     self.error_buff = collections.deque(maxlen=error_buff_length)
     self.error_buff.append((0.0, 0.0))
+    self.errors = []
+    self.saved_errors = False
     self.speed = speed
+    self.error_save_path = error_save_path
 
     # YOUR CODE HERE
     self.cmd_pub = rospy.Publisher(PUB_TOPIC, AckermannDriveStamped, queue_size=10)
@@ -192,11 +197,15 @@ class LineFollower:
                          msg.pose.position.y,
                          utils.quaternion_to_angle(msg.pose.orientation)])
     success, error = self.compute_error(cur_pose)
+    self.errors.append(error)
 
     if not success:
       # We have reached our goal
       self.pose_sub = None # Kill the subscriber
       self.speed = 0.0 # Set speed to zero so car stops
+      if not self.saved_errors:
+        self.save_errors()
+        self.saved_errors = True
 
     delta = self.compute_steering_angle(error)
 
@@ -209,6 +218,15 @@ class LineFollower:
 
     # Send the control message
     self.cmd_pub.publish(ads)
+
+  '''
+  Save errors to csv
+  '''
+  def save_errors(self):
+    with open(self.error_save_path, 'w') as csvfile:
+      for i, error in enumerate(self.errors):
+        writer = csv.writer(csvfile)
+        writer.writerow([i, error])
 
 def main():
 
@@ -223,6 +241,7 @@ def main():
   # YOUR CODE HERE
   plan_topic = '/planner_node/car_plan'
   pose_topic = '/sim_car_pose/pose'
+  error_save_path = '/home/car-user/racecar_ws/src/lab1/docs/errors.csv'
   plan_lookahead = 1
   translation_weight = 1.0
   rotation_weight = 1.0
@@ -251,7 +270,8 @@ def main():
                     ki,
                     kd,
                     error_buff_length,
-                    speed)
+                    speed,
+                    error_save_path)
 
   rospy.spin() # Prevents node from shutting down
 
