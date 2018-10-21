@@ -49,6 +49,7 @@ class LaserWanderer:
     self.compute_time = compute_time
     self.laser_offset = laser_offset
     self.car_length = car_length
+    self.last_traj_depth = -1
 
     # YOUR CODE HERE
     self.cmd_pub = rospy.Publisher(CMD_TOPIC, AckermannDriveStamped, queue_size=10) # Create a publisher for sending controls
@@ -71,7 +72,7 @@ class LaserWanderer:
 
     poses = []
     for i in range(0, self.rollouts.shape[0]):
-      rollout = self.rollouts[i, -1, :]
+      rollout = self.rollouts[i, self.last_traj_depth, :]
       rollout = self.delta_to_current_frame(rollout)
       poses.append(Pose(Point(rollout[0], rollout[1], 0), utils.angle_to_quaternion(rollout[2])))
 
@@ -108,7 +109,7 @@ class LaserWanderer:
 
     # YOUR CODE HERE
     cost = delta
-    distance = np.linalg.norm(self.cur_pose[0:2] - rollout_pose[0:2]) + self.car_length
+    distance = np.linalg.norm(self.cur_pose[0:2] - rollout_pose[0:2])# + self.car_length
     steps = (laser_msg.angle_max - laser_msg.angle_min) / laser_msg.angle_increment
     scan_angles = np.linspace(laser_msg.angle_min, laser_msg.angle_max, steps)
     for i, v in enumerate(scan_angles):
@@ -174,12 +175,10 @@ class LaserWanderer:
         rollout = self.delta_to_current_frame(rollout)
         delta_costs[i] += self.compute_cost(self.deltas[i], rollout, msg)
       traj_depth += 1
+    self.last_traj_depth = traj_depth
 
     # Find the delta that has the smallest cost and execute it by publishing
     # YOUR CODE HERE
-    #for i, v in enumerate(delta_costs):
-    #  print("Cost: " + str(v) + ", Delta: " + str(self.deltas[i]))
-
     min_traj = np.abs(delta_costs).argmin()
     min_cost = delta_costs[min_traj]
     steering_angle = self.deltas[min_traj]
@@ -193,7 +192,7 @@ class LaserWanderer:
     ads.drive.speed = self.speed
 
     # Send the control message
-    self.cmd_pub.publish(ads)
+    #self.cmd_pub.publish(ads)
 
 '''
 Apply the kinematic model to the passed pose and control
@@ -281,8 +280,8 @@ def main():
   speed = 1.0
   min_delta = -0.34
   max_delta = 0.341
-  delta_incr = 0.34/3.0
-  dt = 0.01
+  delta_incr = 0.34/4.0
+  dt = 0.02
   T = 300
   compute_time = 0.09
   laser_offset = 1.0
