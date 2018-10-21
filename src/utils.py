@@ -42,8 +42,8 @@ Out:
 '''
 def angle_between_quaternions(q1, q2):
     q1_inverse = tf.transformations.quaternion_inverse((q1.x, q1.y, q1.z, q1.w))
-    q_delta = tf.transformations.quaternion_multiply(q2, q1_inverse)
-    return quaternion_to_angle(q_delta)
+    q_delta = tf.transformations.quaternion_multiply((q2.x, q2.y, q2.z, q2.w), q1_inverse)
+    return quaternion_to_angle(Quaternion(*q_delta))
 
 '''
 Returns a rotation matrix that applies the passed angle (in radians)

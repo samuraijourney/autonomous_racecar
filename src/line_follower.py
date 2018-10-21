@@ -98,6 +98,7 @@ class LineFollower:
         # If the configuration is in front of the robot, break out of the loop
     while len(self.plan) > 0:
       # YOUR CODE HERE
+      print("Plan length: " + str(len(self.plan)))
       if self.check_if_pose_behind(cur_pose, self.plan[0]):
         self.plan.pop(0)
       else:
@@ -117,9 +118,11 @@ class LineFollower:
 
     # Compute the translation error between the robot and the configuration at goal_idx in the plan
     # YOUR CODE HERE
-    pose_delta = self.plan[goal_idx] - cur_pose
+    goal_pose = self.plan[goal_idx]
+    pose_delta = goal_pose - cur_pose
     translation_error = np.linalg.norm(pose_delta[0:2])
-    if self.check_if_pose_right(cur_pose, self.plan[goal_idx]):
+    if self.check_if_pose_right(cur_pose, goal_pose):
+      print("Multiply by -1")
       translation_error *= -1
 
     # Compute the total error
@@ -127,7 +130,12 @@ class LineFollower:
     # Rotation error is the difference in yaw between the robot and goal configuration
     #   Be careful about the sign of the rotation error
     # YOUR CODE HERE
-    rotation_error = pose_delta[2]
+    q1 = utils.angle_to_quaternion(goal_pose[2])
+    q2 = utils.angle_to_quaternion(cur_pose[2]) 
+    rotation_error = utils.angle_between_quaternions(q2, q1)
+    print("Goal: " + str(goal_pose))
+    print("Cur: " + str(cur_pose))
+    print("Rotation Error: " + str(rotation_error) + ", Translation Error: " + str(translation_error))
     error = self.translation_weight * translation_error + self.rotation_weight * rotation_error
 
     return True, error
@@ -157,6 +165,7 @@ class LineFollower:
 
     # Compute the steering angle as the sum of the pid errors
     # YOUR CODE HERE
+    print("Error: " + str(error) + ", Integ Error: " + str(integ_error) + ", Deriv Error: " + str(deriv_error))
     return self.kp*error + self.ki*integ_error + self.kd*deriv_error
 
   '''
@@ -169,9 +178,7 @@ class LineFollower:
     a = cur_pose[0:2]
     offset_vector = np.array([1, 0])
     rot_matrix = utils.rotation_matrix(cur_pose[2]-rotation_offset)
-    x = rot_matrix[0,0] * offset_vector[0] + rot_matrix[0,1] * offset_vector[1]
-    y = rot_matrix[1,0] * offset_vector[0] + rot_matrix[1,1] * offset_vector[1]
-    b = np.add(a, [x,y])
+    b = np.add(a, np.dot(rot_matrix, offset_vector))
 
     return a, b
 
@@ -200,8 +207,6 @@ class LineFollower:
     ads.drive.steering_angle = delta
     ads.drive.speed = self.speed
 
-    print("Plan length: " + str(len(self.plan)))
-
     # Send the control message
     self.cmd_pub.publish(ads)
 
@@ -218,11 +223,11 @@ def main():
   # YOUR CODE HERE
   plan_topic = '/planner_node/car_plan'
   pose_topic = '/sim_car_pose/pose'
-  plan_lookahead = 5
+  plan_lookahead = 1
   translation_weight = 1.0
   rotation_weight = 1.0
   kp = 2.0
-  ki = 15.0
+  ki = 0.0
   kd = 0.0
   error_buff_length = 10
   speed = 1.0
