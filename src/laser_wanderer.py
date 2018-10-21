@@ -39,17 +39,16 @@ class LaserWanderer:
     speed: The speed at which the car should travel
     compute_time: The amount of time (in seconds) we can spend computing the cost
     laser_offset: How much to shorten the laser measurements
-    car_length: The length of the car (in meters)
   '''
-  def __init__(self, rollouts, deltas, speed, compute_time, laser_offset, car_length):
+  def __init__(self, rollouts, deltas, speed, compute_time, laser_offset):
     # Store the params for later
     self.rollouts = rollouts
     self.deltas = deltas
     self.speed = speed
     self.compute_time = compute_time
     self.laser_offset = laser_offset
-    self.car_length = car_length
     self.last_traj_depth = -1
+    self.previous_costs = None
 
     # YOUR CODE HERE
     self.cmd_pub = rospy.Publisher(CMD_TOPIC, AckermannDriveStamped, queue_size=10) # Create a publisher for sending controls
@@ -109,14 +108,14 @@ class LaserWanderer:
     # NOTE THAT NO COORDINATE TRANSFORMS ARE NECESSARY INSIDE OF THIS FUNCTION
 
     # YOUR CODE HERE
-    cost = delta
-    distance = np.linalg.norm(self.cur_pose[0:2] - rollout_pose[0:2])# + self.car_length
+    cost = np.abs(delta)
+    distance = np.linalg.norm(rollout_pose[0:2])
     steps = (laser_msg.angle_max - laser_msg.angle_min) / laser_msg.angle_increment
     scan_angles = np.linspace(laser_msg.angle_min, laser_msg.angle_max, steps)
     for i, v in enumerate(scan_angles):
       if v > delta:
-        r2 = laser_msg.ranges[i] - np.abs(self.laser_offset)
-        r1 = laser_msg.ranges[i-1] - np.abs(self.laser_offset)
+        r2 = laser_msg.ranges[i] - self.laser_offset
+        r1 = laser_msg.ranges[i-1] - self.laser_offset
         if r1 <= distance:
           cost += MAX_PENALTY
         elif r2 <= distance:
@@ -157,7 +156,10 @@ class LaserWanderer:
 
     # A N dimensional matrix that should be populated with the costs of each
     # trajectory up to time t <= T
-    delta_costs = np.zeros(self.deltas.shape[0], dtype=np.float)
+    if self.previous_costs is None:
+    	delta_costs = np.zeros(self.deltas.shape[0], dtype=np.float)
+    else:
+        delta_costs = 0.1 * self.previous_costs
     traj_depth = 0
 
     # Evaluate the cost of each trajectory. Each iteration of the loop should calculate
@@ -173,7 +175,6 @@ class LaserWanderer:
     while (rospy.Time.now().to_sec() - start) < self.compute_time:
       for i in range(0, self.rollouts.shape[0]):
         rollout = self.rollouts[i, traj_depth, :]
-        rollout = self.delta_to_current_frame(rollout)
         delta_costs[i] += self.compute_cost(self.deltas[i], rollout, msg)
       traj_depth += 1
     self.last_traj_depth = traj_depth
@@ -190,12 +191,17 @@ class LaserWanderer:
     print("Selected Traj: " + str(min_traj) + ", Cost: " + str(min_cost) + ", Delta: " + str(steering_angle))
     print("--------------------------------------------")
 
+    self.previous_costs = delta_costs
+
     # Setup the control message
     ads = AckermannDriveStamped()
     ads.header.frame_id = '/map'
     ads.header.stamp = rospy.Time.now()
     ads.drive.steering_angle = steering_angle
     ads.drive.speed = self.speed
+
+    if min_cost > 2 * MAX_PENALTY:
+      ads.drive.speed *= -0.3
 
     # Send the control message
     self.cmd_pub.publish(ads)
@@ -263,8 +269,8 @@ def generate_mpc_rollouts(speed, min_delta, max_delta, delta_incr, dt, T, car_le
   init_pose = np.array([0.0,0.0,0.0], dtype=np.float)
 
   rollouts = np.zeros((N,T,3), dtype=np.float)
-  dt_scale = 0.15 * (1 - np.abs(deltas / max_delta))
-  dt_scale[int(N/2.0)] += 0.1
+  dt_scale = 0.01 * (1 - np.abs(deltas / max_delta))
+  dt_scale[int(N/2.0)] += 0.01
   for i in xrange(N):
     controls = np.zeros((T,3), dtype=np.float)
     controls[:,0] = speed
@@ -288,21 +294,21 @@ def main():
   speed = 1.0
   min_delta = -0.34
   max_delta = 0.341
-  delta_incr = 0.34/3.0
+  delta_incr = 0.34/5.0
   dt = 0.01
-  T = 300
+  T = 200
   compute_time = 0.09
-  laser_offset = 0.0
 
   # DO NOT ADD THIS TO YOUR LAUNCH FILE, car_length is already provided by teleop.launch
   car_length = rospy.get_param("car_kinematics/car_length", 0.33)
+  laser_offset = car_length
 
   # Generate the rollouts
   rollouts, deltas = generate_mpc_rollouts(speed, min_delta, max_delta,
                                            delta_incr, dt, T, car_length)
 
   # Create the LaserWanderer
-  lw = LaserWanderer(rollouts, deltas, speed, compute_time, laser_offset, car_length)
+  lw = LaserWanderer(rollouts, deltas, speed, compute_time, laser_offset)
 
   # Keep the node alive
   rospy.spin()
