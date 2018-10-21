@@ -51,11 +51,36 @@ class LineFollower:
     # [time_stamp (seconds), error]. For more info about the data struct itself, visit
     # https://docs.python.org/2/library/collections.html#collections.deque
     self.error_buff = collections.deque(maxlen=error_buff_length)
+    self.error_buff.append((0.0, 0.0))
     self.speed = speed
 
     # YOUR CODE HERE
     self.cmd_pub = rospy.Publisher(PUB_TOPIC, AckermannDriveStamped, queue_size=10)
     self.pose_sub = rospy.Subscriber(pose_topic, PoseStamped, self.pose_cb)
+
+  '''
+  Checks if the check_pose is located behind from the current pose
+    cur_pose: The current pose of the car, represented as a numpy array [x,y,theta]
+    check_pose: The pose to check if behind, represented as a numpy array [x,y,theta]
+  Returns: True if the check_pose is behind the cur_pose, otherwise returns False.
+  '''
+  def check_if_pose_behind(self, cur_pose, check_pose):
+    a, b = self.define_line_points(cur_pose, np.pi/2.0)
+    p = check_pose[0:2]
+
+    return np.cross(p-a, b-a) > 0
+
+  '''
+  Checks if the check_pose is located to the right of the current pose
+    cur_pose: The current pose of the car, represented as a numpy array [x,y,theta]
+    check_pose: The pose to check if to the right, represented as a numpy array [x,y,theta]
+  Returns: True if the check_pose is right of cur_pose, otherwise returns False.
+  '''
+  def check_if_pose_right(self, cur_pose, check_pose):
+    a, b = self.define_line_points(cur_pose, 0.0)
+    p = check_pose[0:2]
+
+    return np.cross(p-a, b-a) > 0
 
   '''
   Computes the error based on the current pose of the car
@@ -64,7 +89,6 @@ class LineFollower:
            (True, E) - where E is the computed error
   '''
   def compute_error(self, cur_pose):
-
     # Find the first element of the plan that is in front of the robot, and remove
     # any elements that are behind the robot. To do this:
     # Loop over the plan (starting at the beginning) For each configuration in the plan
@@ -72,23 +96,13 @@ class LineFollower:
         #   Will want to perform a coordinate transformation to determine if
         #   the configuration is in front or behind the robot
         # If the configuration is in front of the robot, break out of the loop
-    a = cur_pose[0:2]
-    offset_vector = np.array([1, 0])
-    rot_matrix = rotation_matrix(cur_pose[2]-(np.pi/2.0))
-    x = rot_matrix[0,0] * offset_vector[0] + rot_matrix[0,1] * offset_vector[1]
-    y = rot_matrix[1,0] * offset_vector[0] + rot_matrix[1,1] * offset_vector[1]
-    b = np.add(a, [x,y])
     while len(self.plan) > 0:
       # YOUR CODE HERE
-      p = self.plan[0][0:2]
-
-      # Project point P onto the line defined by points A and B and check if the point is either below
-      # or above the line
-      if np.cross(p-a, b-a) > 0:
-        self.plan.remove(0)
+      if self.check_if_pose_behind(cur_pose, self.plan[0]):
+        self.plan.pop(0)
       else:
         break
-
+    
     # Check if the plan is empty. If so, return (False, 0.0)
     # YOUR CODE HERE
     if len(self.plan) == 0:
@@ -103,19 +117,20 @@ class LineFollower:
 
     # Compute the translation error between the robot and the configuration at goal_idx in the plan
     # YOUR CODE HERE
-    goal_pose = self.plan[goal_idx]
-    translation_error = np.linalg.norm(cur_pose[0:2]-goal_pose[0:2])
+    pose_delta = self.plan[goal_idx] - cur_pose
+    translation_error = np.linalg.norm(pose_delta[0:2])
+    if self.check_if_pose_right(cur_pose, self.plan[goal_idx]):
+      translation_error *= -1
 
     # Compute the total error
     # Translation error was computed above
     # Rotation error is the difference in yaw between the robot and goal configuration
-    #   Be carefult about the sign of the rotation error
+    #   Be careful about the sign of the rotation error
     # YOUR CODE HERE
-    rotation_error = cur_pose[2]-goal_pose[2]
+    rotation_error = pose_delta[2]
     error = self.translation_weight * translation_error + self.rotation_weight * rotation_error
 
     return True, error
-
 
   '''
   Uses a PID control policy to generate a steering angle from the passed error
@@ -129,7 +144,7 @@ class LineFollower:
     # the most recent error stored in self.error_buff, and the most recent time
     # stored in self.error_buff
     # YOUR CODE HERE
-    last_error = self.error_buff[-1]
+    last_error = self.error_buff.pop()
     deriv_error = (error - last_error[0]) / (now - last_error[1])
 
     # Add the current error to the buffer
@@ -138,15 +153,27 @@ class LineFollower:
     # Compute the integral error by applying rectangular integration to the elements
     # of self.error_buff: https://chemicalstatistician.wordpress.com/2014/01/20/rectangular-integration-a-k-a-the-midpoint-rule/
     # YOUR CODE HERE
-  	integ_error = 0.0
-    for i in range(0, len(self.error_buff)-1):
-      e, t = self.error_buff[i]
-      e_n, t_n = self.error_buff[i+1]
-      integ_error = integ_error + (t_n-t)*(e_n+e)/2.0
+    integ_error = (now-last_error[1])*(error+last_error[0])/2.0
 
     # Compute the steering angle as the sum of the pid errors
     # YOUR CODE HERE
     return self.kp*error + self.ki*integ_error + self.kd*deriv_error
+
+  '''
+  Defines 2 points for a line based off the rotation offset from the current pose
+    cur_pose: The current pose of the car, represented as a numpy array [x,y,theta]
+    rotation_offset: The rotation offset from the current pose theta in radians
+  Returns: (a, b) 2 points on the line
+  '''
+  def define_line_points(self, cur_pose, rotation_offset=0.0):
+    a = cur_pose[0:2]
+    offset_vector = np.array([1, 0])
+    rot_matrix = utils.rotation_matrix(cur_pose[2]-rotation_offset)
+    x = rot_matrix[0,0] * offset_vector[0] + rot_matrix[0,1] * offset_vector[1]
+    y = rot_matrix[1,0] * offset_vector[0] + rot_matrix[1,1] * offset_vector[1]
+    b = np.add(a, [x,y])
+
+    return a, b
 
   '''
   Callback for the current pose of the car
@@ -173,6 +200,8 @@ class LineFollower:
     ads.drive.steering_angle = delta
     ads.drive.speed = self.speed
 
+    print("Plan length: " + str(len(self.plan)))
+
     # Send the control message
     self.cmd_pub.publish(ads)
 
@@ -191,9 +220,9 @@ def main():
   pose_topic = '/sim_car_pose/pose'
   plan_lookahead = 5
   translation_weight = 1.0
-  rotation_weight = 0.0
-  kp = 1.0
-  ki = 0.0
+  rotation_weight = 1.0
+  kp = 2.0
+  ki = 15.0
   kd = 0.0
   error_buff_length = 10
   speed = 1.0
