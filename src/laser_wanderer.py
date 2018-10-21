@@ -72,9 +72,10 @@ class LaserWanderer:
 
     poses = []
     for i in range(0, self.rollouts.shape[0]):
-      rollout = self.rollouts[i, self.last_traj_depth, :]
-      rollout = self.delta_to_current_frame(rollout)
-      poses.append(Pose(Point(rollout[0], rollout[1], 0), utils.angle_to_quaternion(rollout[2])))
+      rollouts = self.rollouts[i, :, :]
+      for j in range(0, self.last_traj_depth):
+        rollout = self.delta_to_current_frame(rollouts[j, :])
+        poses.append(Pose(Point(rollout[0], rollout[1], 0), utils.angle_to_quaternion(rollout[2])))
 
     # Create the PoseArray to publish. Will contain N poses, where the n-th pose
     # represents the last pose in the n-th trajectory
@@ -177,12 +178,17 @@ class LaserWanderer:
       traj_depth += 1
     self.last_traj_depth = traj_depth
 
+    print("--------------------------------------------")
+    for i, v in enumerate(delta_costs):
+      print("Traj: " + str(i) + ", Cost: " + str(v) + ", Delta: " + str(self.deltas[i]))
+
     # Find the delta that has the smallest cost and execute it by publishing
     # YOUR CODE HERE
     min_traj = np.abs(delta_costs).argmin()
     min_cost = delta_costs[min_traj]
     steering_angle = self.deltas[min_traj]
-    print("Traj: " + str(min_traj) + ", Cost: " + str(min_cost) + ", Delta: " + str(steering_angle))
+    print("Selected Traj: " + str(min_traj) + ", Cost: " + str(min_cost) + ", Delta: " + str(steering_angle))
+    print("--------------------------------------------")
 
     # Setup the control message
     ads = AckermannDriveStamped()
@@ -192,7 +198,7 @@ class LaserWanderer:
     ads.drive.speed = self.speed
 
     # Send the control message
-    #self.cmd_pub.publish(ads)
+    self.cmd_pub.publish(ads)
 
 '''
 Apply the kinematic model to the passed pose and control
@@ -257,11 +263,13 @@ def generate_mpc_rollouts(speed, min_delta, max_delta, delta_incr, dt, T, car_le
   init_pose = np.array([0.0,0.0,0.0], dtype=np.float)
 
   rollouts = np.zeros((N,T,3), dtype=np.float)
+  dt_scale = 0.15 * (1 - np.abs(deltas / max_delta))
+  dt_scale[int(N/2.0)] += 0.1
   for i in xrange(N):
     controls = np.zeros((T,3), dtype=np.float)
     controls[:,0] = speed
     controls[:,1] = deltas[i]
-    controls[:,2] = dt
+    controls[:,2] = dt + dt_scale[i]
     rollouts[i,:,:] = generate_rollout(init_pose, controls, car_length)
 
   return rollouts, deltas
@@ -280,11 +288,11 @@ def main():
   speed = 1.0
   min_delta = -0.34
   max_delta = 0.341
-  delta_incr = 0.34/4.0
-  dt = 0.02
+  delta_incr = 0.34/3.0
+  dt = 0.01
   T = 300
   compute_time = 0.09
-  laser_offset = 1.0
+  laser_offset = 0.0
 
   # DO NOT ADD THIS TO YOUR LAUNCH FILE, car_length is already provided by teleop.launch
   car_length = rospy.get_param("car_kinematics/car_length", 0.33)
