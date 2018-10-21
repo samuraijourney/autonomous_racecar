@@ -9,7 +9,7 @@ import utils
 
 from sensor_msgs.msg import LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped
-from geometry_msgs.msg import PoseStamped, PoseArray, Pose
+from geometry_msgs.msg import PoseStamped, PoseArray, Pose, Point
 
 SCAN_TOPIC = '/scan' # The topic to subscribe to for laser scans
 CMD_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0' # The topic to publish controls to
@@ -62,12 +62,6 @@ class LaserWanderer:
     msg: A PoseStamped representing the current pose of the car
   '''
   def viz_cb(self, msg):
-    # Create the PoseArray to publish. Will contain N poses, where the n-th pose
-    # represents the last pose in the n-th trajectory
-    pa = PoseArray()
-    pa.header.frame_id = '/map'
-    pa.header.stamp = rospy.Time.now()
-
     # Transform the last pose of each trajectory to be w.r.t the world and insert into
     # the pose array
     # YOUR CODE HERE
@@ -79,8 +73,13 @@ class LaserWanderer:
     for i in range(0, self.rollouts.shape[0]):
       rollout = self.rollouts[i, -1, :]
       rollout = self.delta_to_current_frame(rollout)
-      poses.append(Pose(Point(rollout[0], rollout[1]), utils.angle_to_quaternion(rollout[2]))
+      poses.append(Pose(Point(rollout[0], rollout[1], 0), utils.angle_to_quaternion(rollout[2])))
 
+    # Create the PoseArray to publish. Will contain N poses, where the n-th pose
+    # represents the last pose in the n-th trajectory
+    pa = PoseArray()
+    pa.header.frame_id = '/map'
+    pa.header.stamp = rospy.Time.now()
     pa.poses = poses
     self.viz_pub.publish(pa)
 
@@ -110,15 +109,15 @@ class LaserWanderer:
     # YOUR CODE HERE
     cost = delta
     distance = np.linalg.norm(self.cur_pose[0:2] - rollout_pose[0:2]) + self.car_length
-    steps = (msg.angle_max - msg.angle_min) / msg.angle_increment
-    scan_angles = np.linspace(msg.angle_min, msg.angle_max, steps)
+    steps = (laser_msg.angle_max - laser_msg.angle_min) / laser_msg.angle_increment
+    scan_angles = np.linspace(laser_msg.angle_min, laser_msg.angle_max, steps)
     for i, v in enumerate(scan_angles):
       if v > delta:
-        r2 = msg.ranges[i] - np.abs(self.laser_offset)
-        r1 = msg.ranges[i-1] - np.abs(self.laser_offset)
+        r2 = laser_msg.ranges[i] - np.abs(self.laser_offset)
+        r1 = laser_msg.ranges[i-1] - np.abs(self.laser_offset)
         if r1 <= distance:
           cost += MAX_PENALTY
-        else if <= distance
+        elif r2 <= distance:
           cost += MAX_PENALTY
         break
 
@@ -132,7 +131,7 @@ class LaserWanderer:
     # Rotate cached rollout to the current poses frame of reference and add to
     # current poses position
     rot_matrix = utils.rotation_matrix(self.cur_pose[2])
-    pose_translation = np.add(self.cur_pose, np.dot(rot_matrix, pose[0:2]))
+    pose_translation = np.add(self.cur_pose[0:2], np.dot(rot_matrix, pose[0:2]))
 
     # Add local rotation angle to the current pose rotation
     pose_rotation = self.cur_pose[2] + pose[2]
@@ -144,7 +143,7 @@ class LaserWanderer:
     if pose_rotation >= rotation_lim:
       pose_rotation -= rotation_lim
 
-    return np.array([pose_translation[0], pose_translation[1], pose_rotation])
+    return np.array([pose_translation[0,0], pose_translation[0,1], pose_rotation])
 
   '''
   Controls the steering angle in response to the received laser scan. Uses approximately
@@ -178,18 +177,23 @@ class LaserWanderer:
 
     # Find the delta that has the smallest cost and execute it by publishing
     # YOUR CODE HERE
-    for i, v in enumerate(delta_costs):
-      print("Cost: " + str(v) + ", Delta: " + str(self.deltas[i]))
+    #for i, v in enumerate(delta_costs):
+    #  print("Cost: " + str(v) + ", Delta: " + str(self.deltas[i]))
+
+    min_traj = np.abs(delta_costs).argmin()
+    min_cost = delta_costs[min_traj]
+    steering_angle = self.deltas[min_traj]
+    print("Traj: " + str(min_traj) + ", Cost: " + str(min_cost) + ", Delta: " + str(steering_angle))
 
     # Setup the control message
     ads = AckermannDriveStamped()
     ads.header.frame_id = '/map'
     ads.header.stamp = rospy.Time.now()
-    ads.drive.steering_angle = self.deltas[delta_costs.argmin()]
+    ads.drive.steering_angle = steering_angle
     ads.drive.speed = self.speed
 
     # Send the control message
-    #self.cmd_pub.publish(ads)
+    self.cmd_pub.publish(ads)
 
 '''
 Apply the kinematic model to the passed pose and control
@@ -227,8 +231,9 @@ def generate_rollout(init_pose, controls, car_length):
   T = controls.shape[0]
   rollout = np.zeros(controls.shape, dtype=np.float)
   pose = init_pose
-  for i in range(0, T):
-    rollout[i, :] = self.kinematic_model_step(pose, controls[i, :], car_length)
+  rollout[0, :] = init_pose
+  for i in range(1, T):
+    rollout[i, :] = kinematic_model_step(rollout[i-1, :], controls[i, :], car_length)
 
   return rollout
 
@@ -274,10 +279,9 @@ def main():
   # 'Starting' values are ones you should consider tuning for your system
   # YOUR CODE HERE
   speed = 1.0
-  num_of_traj = 3.0
   min_delta = -0.34
   max_delta = 0.341
-  delta_incr = 0.34/num_of_traj (consider changing the denominator)
+  delta_incr = 0.34/3.0
   dt = 0.01
   T = 300
   compute_time = 0.09
