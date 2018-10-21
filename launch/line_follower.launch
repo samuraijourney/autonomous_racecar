@@ -4,6 +4,6 @@
 	Launch a line_follower node here
    -->
 
-   <node name="line_follower" pkg="lab0" type="line_follower.py"/>
+   <node name="line_follower" pkg="lab1" type="line_follower.py"/>
 
 </launch>
