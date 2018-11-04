@@ -10,11 +10,11 @@ from vesc_msgs.msg import VescStateStamped
 import matplotlib.pyplot as plt
 
 # YOUR CODE HERE (Set these values and use them in motion_cb)
-KM_V_NOISE = 0.1 # Kinematic car velocity noise std dev
-KM_DELTA_NOISE = 0.01 # Kinematic car delta noise std dev
-KM_X_FIX_NOISE = 0.1 # Kinematic car x position constant noise std dev
-KM_Y_FIX_NOISE = 0.05 # Kinematic car y position constant noise std dev
-KM_THETA_FIX_NOISE = 0.15 # Kinematic car theta constant noise std dev
+KM_V_NOISE = 0.01 # Kinematic car velocity noise std dev
+KM_DELTA_NOISE = 0.0 # Kinematic car delta noise std dev
+KM_X_FIX_NOISE = 0.0 # Kinematic car x position constant noise std dev
+KM_Y_FIX_NOISE = 0.0 # Kinematic car y position constant noise std dev
+KM_THETA_FIX_NOISE = 0.0 # Kinematic car theta constant noise std dev
 
 '''
   Propagates the particles forward based on the velocity and steering angle of the car
@@ -87,7 +87,13 @@ class KinematicMotionModel:
     # YOUR CODE HERE
     particle_count = self.particles.shape[0]
     v = (msg.state.speed - self.SPEED_TO_ERPM_OFFSET) / self.SPEED_TO_ERPM_GAIN
-    v += np.random.normal(0, KM_V_NOISE, particle_count)
+    d = self.last_servo_cmd
+
+    if (KM_V_NOISE > 0):
+      v += np.random.normal(0, KM_V_NOISE, particle_count)
+
+    if (KM_DELTA_NOISE > 0):
+      d += np.random.normal(0, KM_DELTA_NOISE, particle_count)
 
     # Propagate particles forward in place
       # Sample control noise and add to nominal control
@@ -98,18 +104,30 @@ class KinematicMotionModel:
       # Vectorize your computations as much as possible
       # All updates to self.particles should be in-place
     # YOUR CODE HERE
-    dt = rospy.Time.now().sec - self.last_vesc_stamp.sec
-    d = self.last_servo_cmd + np.random.normal(0, KM_DELTA_NOISE, particle_count)
-    x = self.particles[:,0] + v * np.cos(self.particles[:,2]) * dt
-    y = self.particles[:,1] + v * np.sin(self.particles[:,2]) * dt
-    theta = self.particles[:,2] + v * np.tan(d) * dt / self.CAR_LENGTH
+    dt = (rospy.Time.now()- self.last_vesc_stamp).secs
+    # x = self.particles[:,0] + v * np.cos(self.particles[:,2]) * dt
+    # y = self.particles[:,1] + v * np.sin(self.particles[:,2]) * dt
+    # theta = self.particles[:,2] + v * np.tan(d) * dt / float(self.CAR_LENGTH)
 
-    x += np.random.normal(0, KM_X_FIX_NOISE, particle_count)
-    y += np.random.normal(0, KM_Y_FIX_NOISE, particle_count)
-    theta += np.random.normal(0, KM_THETA_FIX_NOISE, particle_count)
+    beta = np.arctan(0.5 * np.tan(d))
+    theta = self.particles[:,2] + v * np.sin(2 * beta) * dt / float(self.CAR_LENGTH)
+    if (KM_THETA_FIX_NOISE > 0):
+      theta += np.random.normal(0, KM_THETA_FIX_NOISE, particle_count)
 
-    theta[theta < -np.pi] += 2*np.pi
+    # Limits all angles from 0 -> 2*pi
+    theta = np.mod(theta, 2*np.pi)
+
+    # Limits all angles from -pi -> pi
     theta[theta > np.pi] -= 2*np.pi
+
+    x = self.particles[:,0] + self.CAR_LENGTH * (np.sin(theta) - np.sin(self.particles[:,2])) / np.sin(2 * beta)
+    y = self.particles[:,1] + self.CAR_LENGTH * (-np.cos(theta) + np.cos(self.particles[:,2])) / np.sin(2 * beta)
+
+    if (KM_X_FIX_NOISE > 0):
+      x += np.random.normal(0, KM_X_FIX_NOISE, particle_count)
+
+    if (KM_Y_FIX_NOISE > 0):
+      y += np.random.normal(0, KM_Y_FIX_NOISE, particle_count)
 
     self.particles[:,0] = x
     self.particles[:,1] = y
