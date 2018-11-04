@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 # YOUR CODE HERE (Set these values and use them in motion_cb)
 KM_V_NOISE = 0.01 # Kinematic car velocity noise std dev
-KM_DELTA_NOISE = 0.0 # Kinematic car delta noise std dev
+KM_DELTA_NOISE = 0.1 # Kinematic car delta noise std dev
 KM_X_FIX_NOISE = 0.0 # Kinematic car x position constant noise std dev
 KM_Y_FIX_NOISE = 0.0 # Kinematic car y position constant noise std dev
 KM_THETA_FIX_NOISE = 0.0 # Kinematic car theta constant noise std dev
@@ -105,10 +105,6 @@ class KinematicMotionModel:
       # All updates to self.particles should be in-place
     # YOUR CODE HERE
     dt = (rospy.Time.now()- self.last_vesc_stamp).secs
-    # x = self.particles[:,0] + v * np.cos(self.particles[:,2]) * dt
-    # y = self.particles[:,1] + v * np.sin(self.particles[:,2]) * dt
-    # theta = self.particles[:,2] + v * np.tan(d) * dt / float(self.CAR_LENGTH)
-
     beta = np.arctan(0.5 * np.tan(d))
     theta = self.particles[:,2] + v * np.sin(2 * beta) * dt / float(self.CAR_LENGTH)
     if (KM_THETA_FIX_NOISE > 0):
