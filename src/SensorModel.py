@@ -87,26 +87,34 @@ class SensorModel:
     # YOUR CODE HERE
     ranges = np.array(msg.ranges)
     if (self.laser_angles is None):
-      self.laser_angles = np.linspace(msg.angle_min, msg.angle_max, (msg.angle_max - msg.angle_min) / angle_increment + 1)
+      self.laser_angles = np.linspace(msg.angle_min, msg.angle_max, (msg.angle_max - msg.angle_min) / msg.angle_increment + 2)
+      print(self.laser_angles.size)
+      print(ranges.size)
+      print(msg.angle_min)
+      print(msg.angle_max)
+      print(msg.angle_increment)
       assert self.laser_angles.size == ranges.size
 
     downsampled_ranges = []
     downsampled_angles = []
-    for i in xrange(ranges.size):
+    i = 0
+    while i < ranges.size:
       if (np.isnan(ranges[i]) or (ranges[i] == 0.0)):
         ranges[i] = self.MAX_RANGE_METERS
 
       # Documentation for LaserScan states that any readings outside the msg min/max ranges should be discarded
       if (ranges[i] < msg.range_min):
+        i += 1
         continue
       if (ranges[i] > msg.range_max):
+        i += 1
         continue
 
       downsampled_ranges.append(ranges[i])
       downsampled_angles.append(self.laser_angles[i])
       i += self.LASER_RAY_STEP
 
-    obs = (downsampled_ranges, downsampled_angles)
+    obs = (np.array(downsampled_ranges, dtype=np.float32), np.array(downsampled_angles, dtype=np.float32))
     self.apply_sensor_model(self.particles, obs, self.weights)
     self.weights /= np.sum(self.weights)
 
@@ -142,10 +150,13 @@ class SensorModel:
     # Note that the 'self' parameter is completely unused in this function
 
     dists = np.linspace(0, table_width - 1, table_width)
+    short = 1
 
     for d in xrange(table_width):
       phit = norm.pdf(d, dists, SIGMA_HIT)
-      pshort = short * np.exp(-short * dists) / (1 - np.exp(-short * d))
+      pshort = short * np.exp(-short * dists)
+      if d > 0:
+        pshort /= (1 - np.exp(-short * d))
       pshort[d+1:] = 0
       pmax = np.zeros(table_width)
       pmax[-1] = 1
