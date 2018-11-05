@@ -86,15 +86,6 @@ class SensorModel:
     #   You may choose to use self.laser_angles and self.downsampled_angles here
     # YOUR CODE HERE
     ranges = np.array(msg.ranges)
-    if (self.laser_angles is None):
-      self.laser_angles = np.linspace(msg.angle_min, msg.angle_max, (msg.angle_max - msg.angle_min) / msg.angle_increment + 2)
-      print(self.laser_angles.size)
-      print(ranges.size)
-      print(msg.angle_min)
-      print(msg.angle_max)
-      print(msg.angle_increment)
-      assert self.laser_angles.size == ranges.size
-
     downsampled_ranges = []
     downsampled_angles = []
     i = 0
@@ -109,9 +100,12 @@ class SensorModel:
       if (ranges[i] > msg.range_max):
         i += 1
         continue
+      if (self.EXCLUDE_MAX_RANGE_RAYS and (ranges[i] > self.MAX_RANGE_METERS)):
+        i += 1
+        continue
 
       downsampled_ranges.append(ranges[i])
-      downsampled_angles.append(self.laser_angles[i])
+      downsampled_angles.append(msg.angle_min + i * msg.angle_increment)
       i += self.LASER_RAY_STEP
 
     obs = (np.array(downsampled_ranges, dtype=np.float32), np.array(downsampled_angles, dtype=np.float32))
@@ -162,7 +156,7 @@ class SensorModel:
       pmax[-1] = 1
       prand = np.ones(table_width) / table_width
 
-      sensor_model_table[d,:] = np.dot([Z_HIT, Z_SHORT, Z_MAX, Z_RAND], [phit, pshort, pmax, prand])
+      sensor_model_table[:,d] = np.dot([Z_HIT, Z_SHORT, Z_MAX, Z_RAND], [phit, pshort, pmax, prand])
 
     return sensor_model_table
 
