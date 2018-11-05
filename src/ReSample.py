@@ -35,11 +35,11 @@ class ReSampler:
     self.state_lock.acquire()
 
     # YOUR CODE HERE
-    M = float(self.particles.shape[0])
+    M = self.particles.shape[0]
     indices = np.arange(M)
     indices = np.random.choice(indices, M)
-    self.particles = self.particles[indices]
-    self.weights = self.weights[indices]
+    self.particles[:] = self.particles[indices]
+    self.weights[:] = self.weights[indices]
 
     self.state_lock.release()
 
@@ -51,22 +51,20 @@ class ReSampler:
     self.state_lock.acquire()
 
     # YOUR CODE HERE
-    X = np.array([])
-    W = np.array([])
+    indices = []
     M = float(self.particles.shape[0])
     r = np.random.uniform()/M
     c = self.weights[1]
     i = 1
-    for m in range(1,M):
+    for m in range(1,int(M)+1):
       U = r + (m-1)/M
       while U > c:
         i += 1
         c += self.weights[i]
-      np.append(X, self.particles[i])
-      np.append(W, self.weights[i])
+      indices.append(i)
 
-    self.particles = X
-    self.weights = W
+    self.particles[:] = self.particles[indices]
+    self.weights[:] = self.weights[indices]
 
     self.state_lock.release()
 
