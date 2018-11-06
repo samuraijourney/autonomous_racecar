@@ -88,7 +88,11 @@ class SensorModel:
     ranges = np.array(msg.ranges)
     if (self.laser_angles is None):
       self.laser_angles = np.arange(msg.angle_min, msg.angle_max, msg.angle_increment)
-      assert self.laser_angles.size == ranges.size
+      self.laser_angles = np.append(self.laser_angles, self.laser_angles[-1] + msg.angle_increment)
+
+      # Simulation does not include last scan angle but actual data does...
+      size = np.min([self.laser_angles.size, ranges.size])
+      self.laser_angles = self.laser_angles[:size]
 
     ranges = ranges[::self.LASER_RAY_STEP]
     angles = self.laser_angles[::self.LASER_RAY_STEP]
