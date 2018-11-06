@@ -86,29 +86,17 @@ class SensorModel:
     #   You may choose to use self.laser_angles and self.downsampled_angles here
     # YOUR CODE HERE
     ranges = np.array(msg.ranges)
-    downsampled_ranges = []
-    downsampled_angles = []
-    i = 0
-    while i < ranges.size:
-      if (np.isnan(ranges[i]) or (ranges[i] == 0.0)):
-        ranges[i] = self.MAX_RANGE_METERS
+    if (self.laser_angles is None):
+      self.laser_angles = np.arange(msg.angle_min, msg.angle_max, msg.angle_increment)
+      assert self.laser_angles.size == ranges.size
 
-      # Documentation for LaserScan states that any readings outside the msg min/max ranges should be discarded
-      if (ranges[i] < msg.range_min):
-        i += 1
-        continue
-      if (ranges[i] > msg.range_max):
-        i += 1
-        continue
-      if (self.EXCLUDE_MAX_RANGE_RAYS and (ranges[i] > self.MAX_RANGE_METERS)):
-        i += 1
-        continue
-
-      downsampled_ranges.append(ranges[i])
-      downsampled_angles.append(msg.angle_min + i * msg.angle_increment)
-      i += self.LASER_RAY_STEP
-
-    obs = (np.array(downsampled_ranges, dtype=np.float32), np.array(downsampled_angles, dtype=np.float32))
+    ranges = ranges[::self.LASER_RAY_STEP]
+    angles = self.laser_angles[::self.LASER_RAY_STEP]
+    ranges[np.isnan(ranges)] = self.MAX_RANGE_METERS
+    ranges[ranges == 0.0] = self.MAX_RANGE_METERS
+    ranges[ranges < msg.range_min] = self.MAX_RANGE_METERS
+    ranges[ranges > msg.range_max] = self.MAX_RANGE_METERS
+    obs = (ranges.astype(np.float32), angles.astype(np.float32))
     self.apply_sensor_model(self.particles, obs, self.weights)
     self.weights /= np.sum(self.weights)
 

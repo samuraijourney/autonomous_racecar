@@ -87,7 +87,7 @@ class KinematicMotionModel:
     # YOUR CODE HERE
     particle_count = self.particles.shape[0]
     v = (msg.state.speed - self.SPEED_TO_ERPM_OFFSET) / self.SPEED_TO_ERPM_GAIN
-    d = self.last_servo_cmd
+    d = (self.last_servo_cmd - self.STEERING_TO_SERVO_OFFSET) / self.STEERING_TO_SERVO_GAIN
 
     if (KM_V_NOISE > 0):
       v += np.random.normal(0, KM_V_NOISE, particle_count)
@@ -104,7 +104,7 @@ class KinematicMotionModel:
       # Vectorize your computations as much as possible
       # All updates to self.particles should be in-place
     # YOUR CODE HERE
-    dt = (rospy.Time.now()- self.last_vesc_stamp).secs
+    dt = msg.header.stamp.to_sec() - self.last_vesc_stamp.to_sec()
     beta = np.arctan(0.5 * np.tan(d))
     theta = self.particles[:,2] + v * np.sin(2 * beta) * dt / float(self.CAR_LENGTH)
     if (KM_THETA_FIX_NOISE > 0):

@@ -77,6 +77,8 @@ class ParticleFilter():
     # Globally initialize the particles
     self.initialize_global()
 
+    print('Globals initialized')
+
     # Publish particle filter state
     self.pub_tf = tf.TransformBroadcaster() # Used to create a tf between the map and the laser for visualization
     self.pose_pub      = rospy.Publisher(PUBLISH_PREFIX + "/inferred_pose", PoseStamped, queue_size = 1) # Publishes the expected pose
@@ -87,16 +89,22 @@ class ParticleFilter():
     self.RESAMPLE_TYPE = resample_type # Whether to use naiive or low variance sampling
     self.resampler = ReSampler(self.particles, self.weights, self.state_lock)  # An object used for resampling
 
+    print('Resampler started')
+
     # An object used for applying sensor model
     self.sensor_model = SensorModel(scan_topic, laser_ray_step, exclude_max_range_rays,
                                     max_range_meters, map_msg, self.particles, self.weights,
                                     self.state_lock)
+
+    print('Sensor model started')
 
     # An object used for applying kinematic motion model
     self.motion_model = KinematicMotionModel(motor_state_topic, servo_state_topic,
                                              speed_to_erpm_offset, speed_to_erpm_gain,
                                              steering_angle_to_servo_offset, steering_angle_to_servo_gain,
                                              car_length, self.particles, self.state_lock)
+
+    print('Kinematic motion model started')
 
     # Subscribe to the '/initialpose' topic. Publised by RVIZ. See clicked_pose_cb function in this file for more info
     self.pose_sub  = rospy.Subscriber("/initialpose", PoseWithCovarianceStamped, self.clicked_pose_cb, queue_size=1)
@@ -118,30 +126,27 @@ class ParticleFilter():
     # Update weights in place so that all particles have the same weight and the
     # sum of the weights is one.
     # YOUR CODE HERE
-    self.reset_estimates()
     step = int(self.permissible_region[self.permissible_region == 1].size / self.N_PARTICLES)
     m = 0
+    k = 0
+    skip = 0
     while k < self.permissible_region.size:
-      if self.permissible_region[k] == 0:
-        k += 1
-        continue
-
       x = np.mod(k, self.map_info.width)
       y = int(k / self.map_info.width)
-      self.particles[m,:] = np.array([x, y, 0])
+      k += 1
+      if self.permissible_region[y, x] == 0:
+        continue
 
-      m += 1
-      k += step
+      if skip == 0:
+        self.particles[m,:] = np.array([x, y, 0])
+        m += 1
+        skip = step
+      else:
+        skip -= 1
 
-    utils.map_to_world(self.particles, self.map_info)
+
+    Utils.map_to_world(self.particles, self.map_info)
     self.state_lock.release()
-
-  '''
-    Resets pose estimates
-  '''
-  def reset_estimates(self):
-    self.particles = np.zeros((self.N_PARTICLES,3))
-    self.weights = np.ones(self.N_PARTICLES) / float(self.N_PARTICLES)
 
   '''
     Publish a tf between the laser and the map
@@ -177,15 +182,15 @@ class ParticleFilter():
     # YOUR CODE HERE
     s = np.average(np.sin(self.particles[:,2]))
     c = np.average(np.cos(self.particles[:,2]))
-    theta = np.atan(s/c)
+    theta = np.arctan(s/c)
 
     if c < 0:
       theta += np.pi
     elif (c > 0) and (s < 0):
       theta += 2*np.pi
 
-    x = np.average(self.particles[:,0])
-    y = np.average(self.particles[:,1])
+    x = np.dot(self.weights, self.particles[:,0])
+    y = np.dot(self.weights, self.particles[:,1])
 
     return np.array([x, y, theta])
 
@@ -200,15 +205,17 @@ class ParticleFilter():
     # Updates the particles in place
     # Updates the weights to all be equal, and sum to one
     # YOUR CODE HERE
+    print("Received initial pose callback")
+
     x_std = 0.5
     y_std = 0.5
     theta_std = 0.1
 
-    pose = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y, utils.quaternion_to_angle(msg.pose.pose.orientation)])
-    self.reset_estimates()
+    pose = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y, Utils.quaternion_to_angle(msg.pose.pose.orientation)])
     self.particles[:,0] = np.random.normal(pose[0], x_std, self.N_PARTICLES)
     self.particles[:,1] = np.random.normal(pose[1], y_std, self.N_PARTICLES)
     self.particles[:,2] = np.random.normal(pose[2], theta_std, self.N_PARTICLES)
+    self.weights[:] = 1 / float(self.particles.shape[0])
 
     self.state_lock.release()
 
