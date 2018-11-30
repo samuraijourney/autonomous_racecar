@@ -1,0 +1,9 @@
+<launch>
+
+   <!--
+	Launch a laser_wanderer node here
+   -->
+
+   <node name="laser_wanderer" pkg="lab1" type="laser_wanderer.py" output="screen"/>
+
+</launch>
