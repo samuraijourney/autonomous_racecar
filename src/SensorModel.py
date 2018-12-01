@@ -1,32 +1,34 @@
 #!/usr/bin/env python
 
 import numpy as np
+from scipy.stats import norm
 import rospy
 import range_libc
 import time
+import math
 from threading import Lock
 from nav_msgs.srv import GetMap
 import rosbag
 import matplotlib.pyplot as plt
 import utils as Utils
 from sensor_msgs.msg import LaserScan
-from scipy.stats import norm
 
 THETA_DISCRETIZATION = 112 # Discretization of scanning angle
 INV_SQUASH_FACTOR = 0.2    # Factor for helping the weight distribution to be less peaked
 
 # YOUR CODE HERE (Set these values and use them in precompute_sensor_model)
-Z_SHORT = 0.15  # Weight for short reading
-Z_MAX = 0.15    # Weight for max reading
-Z_RAND = 0.15   # Weight for random reading
-SIGMA_HIT = 5   # Noise value for hit reading
-Z_HIT = 0.55    # Weight for hit reading
+Z_SHORT       = 0.01 # Weight for short reading
+Z_MAX         = 0.10 # Weight for max reading
+Z_RAND        = 0.01 # Weight for random reading
+SIGMA_HIT     = 2.0 # Noise value for hit reading
+Z_HIT         = 0.8 # Weight for hit reading
+LAMBDA_SHORT  = 2.0 
 
-'''
+''' 
   Weights particles according to their agreement with the observed data
 '''
 class SensorModel:
-
+	
   '''
   Initializes the sensor model
     scan_topic: The topic containing laser scans
@@ -38,20 +40,20 @@ class SensorModel:
     weights: The weights of the particles
     state_lock: Used to control access to particles and weights
   '''
-  def __init__(self, scan_topic, laser_ray_step, exclude_max_range_rays,
+  def __init__(self, scan_topic, laser_ray_step, exclude_max_range_rays, 
                max_range_meters, map_msg, particles, weights, state_lock=None):
     if state_lock is None:
       self.state_lock = Lock()
     else:
       self.state_lock = state_lock
-
+  
     self.particles = particles
     self.weights = weights
-
+    
     self.LASER_RAY_STEP = laser_ray_step # Step for downsampling laser scans
     self.EXCLUDE_MAX_RANGE_RAYS = exclude_max_range_rays # Whether to exclude rays that are beyond the max range
     self.MAX_RANGE_METERS = max_range_meters # The max range of the laser
-
+    
     oMap = range_libc.PyOMap(map_msg) # A version of the map that range_libc can understand
     max_range_px = int(self.MAX_RANGE_METERS / map_msg.info.resolution) # The max range in pixels of the laser
     self.range_method = range_libc.PyCDDTCast(oMap, max_range_px, THETA_DISCRETIZATION) # The range method that will be used for ray casting
@@ -60,95 +62,91 @@ class SensorModel:
     self.queries = None # Do not modify this variable
     self.ranges = None # Do not modify this variable
     self.laser_angles = None # The angles of each ray
-    self.downsampled_angles = None # The angles of the downsampled rays
+    self.downsampled_angles = None # The angles of the downsampled rays 
     self.do_resample = False # Set so that outside code can know that it's time to resample
-
+    
     # Subscribe to laser scans
-    self.laser_sub = rospy.Subscriber(scan_topic, LaserScan, self.lidar_cb, queue_size=1)
+    self.laser_sub = rospy.Subscriber(scan_topic, LaserScan, self.lidar_cb, queue_size=1)    
 
   '''
     Downsamples laser measurements and applies sensor model
       msg: A sensor_msgs/LaserScan
-  '''
+  '''    
   def lidar_cb(self, msg):
     self.state_lock.acquire()
 
-    # Compute the observation obs
-    #   obs is a a two element tuple
-    #   obs[0] is the downsampled ranges
-    #   obs[1] is the downsampled angles
-    #   Note it should be the case that obs[0].shape[0] == obs[1].shape[0]
     #   Each element of obs must be a numpy array of type np.float32
     #   Use self.LASER_RAY_STEP as the downsampling step
     #   Keep efficiency in mind, including by caching certain things that won't change across future iterations of this callback
     #   and vectorizing computations as much as possible
-    #   Set all range measurements that are NAN or 0.0 to self.MAX_RANGE_METERS
-    #   You may choose to use self.laser_angles and self.downsampled_angles here
-    # YOUR CODE HERE
-    ranges = np.array(msg.ranges)
     if (self.laser_angles is None):
-      self.laser_angles = np.arange(msg.angle_min, msg.angle_max, msg.angle_increment)
-      self.laser_angles = np.append(self.laser_angles, self.laser_angles[-1] + msg.angle_increment)
+      self.laser_angles = np.linspace(msg.angle_min, msg.angle_max, len(msg.ranges))
+      self.downsampled_angles = self.laser_angles[0::self.LASER_RAY_STEP].astype(np.float32)
 
-      # Simulation does not include last scan angle but actual data does...
-      size = np.min([self.laser_angles.size, ranges.size])
-      self.laser_angles = self.laser_angles[:size]
+    downsampled_ranges = np.array(msg.ranges[0::self.LASER_RAY_STEP]).astype(np.float32)
+    #   Set all range measurements that are NAN or 0.0 to self.MAX_RANGE_METERS
+    downsampled_ranges[np.isnan(downsampled_ranges)] = self.MAX_RANGE_METERS
+    downsampled_ranges[downsampled_ranges == 0] = self.MAX_RANGE_METERS
 
-    ranges = ranges[::self.LASER_RAY_STEP]
-    angles = self.laser_angles[::self.LASER_RAY_STEP]
-    ranges[np.isnan(ranges)] = self.MAX_RANGE_METERS
-    ranges[ranges == 0.0] = self.MAX_RANGE_METERS
-    ranges[ranges < msg.range_min] = self.MAX_RANGE_METERS
-    ranges[ranges > msg.range_max] = self.MAX_RANGE_METERS
-    obs = (ranges.astype(np.float32), angles.astype(np.float32))
+    #   obs is a a two element tuple
+    #   obs[0] is the downsampled ranges
+    #   obs[1] is the downsampled angles
+    obs = (downsampled_ranges, self.downsampled_angles)
+
     self.apply_sensor_model(self.particles, obs, self.weights)
     self.weights /= np.sum(self.weights)
-
+    
     self.last_laser = msg
     self.do_resample = True
     self.state_lock.release()
-
+    
   '''
-    Compute table enumerating the probability of observing a measurement
+    Compute table enumerating the probability of observing a measurement 
     given the expected measurement
     Element (r,d) of the table is the probability of observing measurement r (in pixels)
     when the expected measurement is d (in pixels)
     max_range_px: The maximum range in pixels
-    Returns the table (which is a numpy array with dimensions [max_range_px+1, max_range_px+1])
-  '''
+    Returns the table (which is a numpy array with dimensions [max_range_px+1, max_range_px+1]) 
+  '''  
   def precompute_sensor_model(self, max_range_px):
-
+    print("precompute_sensor_model")
     table_width = int(max_range_px) + 1
     sensor_model_table = np.zeros((table_width,table_width))
 
     # Populate sensor_model_table according to the laser beam model specified
     # in CH 6.3 of Probabilistic Robotics
     # Note: no need to use any functions from utils.py to compute between world
-    #       and map coordinates here
-    # YOUR CODE HERE
-    # Pseudo-code
-    # for d in xrange(table_width):
-    #   possibly some stuff here
-    #   for r in xrange(table_width):
-    #     Populate the sensor model table at (r,d) with the probability of
-    #     observing measurement r (in pixels)
-    #     when the expected measurement is d (in pixels)
-    # Note that the 'self' parameter is completely unused in this function
-
-    dists = np.linspace(0, table_width - 1, table_width)
-    short = 1
-
+    #       and map coordinates here    
     for d in xrange(table_width):
-      phit = norm.pdf(d, dists, SIGMA_HIT)
-      pshort = short * np.exp(-short * dists)
-      if d > 0:
-        pshort /= (1 - np.exp(-short * d))
-      pshort[d+1:] = 0
-      pmax = np.zeros(table_width)
-      pmax[-1] = 1
-      prand = np.ones(table_width) / table_width
+      pHit    = np.zeros(table_width)
+      pShort  = np.zeros(table_width)
+      pMax    = np.zeros(table_width)
+      pRand   = np.zeros(table_width)
+      
+      for r in xrange(table_width):
+        pHit[r] = np.exp(-0.5*(math.pow(r-d,2))/(math.pow(SIGMA_HIT,2))) / (SIGMA_HIT * np.sqrt(2.0*np.pi))
 
-      sensor_model_table[:,d] = np.dot([Z_HIT, Z_SHORT, Z_MAX, Z_RAND], [phit, pshort, pmax, prand])
+        pShort[r] = 0.0
+        if r <= d:
+          pShort[r] = LAMBDA_SHORT * math.exp(-LAMBDA_SHORT*r)
+
+        pMax[r] = 0.0
+        if r == max_range_px:
+          pMax[r] = 1.0
+
+        pRand[r] = 0.0
+        if r < max_range_px:
+          pRand[r] = 1.0/max_range_px
+      
+      pHitNormInv = np.sum(pHit)
+      pShortNormInv = 1 - math.exp(-LAMBDA_SHORT*d)
+      if pHitNormInv == 0: pHitNormInv = 1.0
+      if pShortNormInv == 0: pShortNormInv = 1.0
+
+      sensor_model_table[:,d] = Z_HIT*pHit/pHitNormInv + \
+                                Z_SHORT*pShort/pShortNormInv + \
+                                Z_MAX*pMax + \
+                                Z_RAND*pRand
 
     return sensor_model_table
 
@@ -159,16 +157,15 @@ class SensorModel:
       weights: The weights of each particle
   '''
   def apply_sensor_model(self, proposal_dist, obs, weights):
-
     obs_ranges = obs[0]
     obs_angles = obs[1]
     num_rays = obs_angles.shape[0]
-
+    
     # Only allocate buffers once to avoid slowness
     if not isinstance(self.queries, np.ndarray):
       self.queries = np.zeros((proposal_dist.shape[0],3), dtype=np.float32)
       self.ranges = np.zeros(num_rays*proposal_dist.shape[0], dtype=np.float32)
-
+    
     self.queries[:,:] = proposal_dist[:,:]
 
     # Raycasting to get expected measurements
@@ -191,11 +188,11 @@ if __name__ == '__main__':
 
   rospy.init_node("sensor_model", anonymous=True) # Initialize the node
 
-  bag_path = rospy.get_param("~bag_path", '/home/car-user/racecar_ws/src/ta_lab2/bags/laser_scans/laser_scan1.bag')
+  bag_path = rospy.get_param("~bag_path", '~/assignments/a0/src/lab2/bags/laser_scans/laser_scan2.bag')
   scan_topic = rospy.get_param("~scan_topic", "/scan") # The topic containing laser scans
   laser_ray_step = int(rospy.get_param("~laser_ray_step")) # Step for downsampling laser scans
   exclude_max_range_rays = bool(rospy.get_param("~exclude_max_range_rays")) # Whether to exclude rays that are beyond the max range
-  max_range_meters = float(rospy.get_param("~max_range_meters")) # The max range of the laser
+  max_range_meters = float(rospy.get_param("~max_range_meters")) # The max range of the laser               
 
   print 'Bag path: ' + bag_path
 
@@ -203,7 +200,7 @@ if __name__ == '__main__':
   print("Getting map from service: ", MAP_TOPIC)
   rospy.wait_for_service(MAP_TOPIC)
   map_msg = rospy.ServiceProxy(MAP_TOPIC, GetMap)().map # The map, will get passed to init of sensor model
-  map_info = map_msg.info # Save info about map for later use
+  map_info = map_msg.info # Save info about map for later use    
 
   print 'Creating permissible region'
   # Create numpy array representing map for later use
@@ -212,9 +209,9 @@ if __name__ == '__main__':
   permissible_region[array_255==0] = 1 # Numpy array of dimension (map_msg.info.height, map_msg.info.width),
                                             # With values 0: not permissible, 1: permissible
   permissible_x, permissible_y = np.where(permissible_region == 1)
-
+  
   # Potentially downsample permissible_x and permissible_y here
-
+  
   print 'Creating particles'
   angle_step = 25
   particles = np.zeros((angle_step * permissible_x.shape[0],3))
@@ -222,17 +219,17 @@ if __name__ == '__main__':
     particles[i*(particles.shape[0]/angle_step):(i+1)*(particles.shape[0]/angle_step),0] = permissible_y[:]
     particles[i*(particles.shape[0]/angle_step):(i+1)*(particles.shape[0]/angle_step),1] = permissible_x[:]
     particles[i*(particles.shape[0]/angle_step):(i+1)*(particles.shape[0]/angle_step),2] = i*(2*np.pi / angle_step)
-
+  
   Utils.map_to_world(particles, map_info)
   weights = np.ones(particles.shape[0]) / float(particles.shape[0])
-
+  
   print 'Initializing sensor model'
-  sm = SensorModel(scan_topic, laser_ray_step, exclude_max_range_rays,
+  sm = SensorModel(scan_topic, laser_ray_step, exclude_max_range_rays, 
                    max_range_meters, map_msg, particles, weights)
-
+  
   # Give time to get setup
   rospy.sleep(1.0)
-
+  
   # Load laser scan from bag
   bag = rosbag.Bag(bag_path)
   for _, msg, _ in bag.read_messages(topics=['/scan']):
@@ -241,21 +238,21 @@ if __name__ == '__main__':
 
   w_min = np.amin(weights)
   w_max = np.amax(weights)
-
-
+  
+  
   pub_laser = rospy.Publisher(scan_topic, LaserScan, queue_size = 1) # Publishes the most recent laser scan
   print("Starting analysis, this could take awhile...")
   while not isinstance(sm.queries, np.ndarray):
     pub_laser.publish(laser_msg)
     rospy.sleep(1.0)
-
+ 
   rospy.sleep(1.0) # Make sure there's enough time for laserscan to get lock
-
+  
   print 'Going to wait for sensor model to finish'
   sm.state_lock.acquire()
   print 'Done, preparing to plot'
   weights = weights.reshape((angle_step, -1))
-
+  
   weights = np.amax(weights, axis=0)
   print map_msg.info.height
   print map_msg.info.width
@@ -265,10 +262,10 @@ if __name__ == '__main__':
   print 'w_min = %f'%w_min
   print 'w_max = %f'%w_max
   weights = 0.9*(weights-w_min)/(w_max-w_min) + 0.1
-
+  
   img = np.zeros((map_msg.info.height,map_msg.info.width))
   for i in xrange(len(permissible_x)):
     img[permissible_y[i],permissible_x[i]] = weights[i]
   plt.imshow(img)
   plt.show()
-
+  
