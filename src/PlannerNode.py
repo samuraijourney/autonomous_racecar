@@ -157,13 +157,11 @@ class PlannerNode(object):
     if len (req.poses) != 2:
       return
 
-    source = np.array (req.poses[0].position)
-    target = np.array ([req.poses[1].position.x, req.poses[1].position.y]).reshape (2)
+    source = np.array ([[req.poses[0].position.x, req.poses[0].position.y, req.poses[0].position.z]], dtype='float64')
+    target = np.array ([req.poses[1].position.x, req.poses[1].position.y], dtype="int").reshape (2)
 
-    source = Utils.world_to_map ([source], self.map.info)[0]
+    source = Utils.world_to_map (source, self.map.info)[:,2]
 
-    print(source)
-    print(target)
     plan = Astar.generate_plan (self.prm, source, target)
 
     if plan:
@@ -175,8 +173,7 @@ class PlannerNode(object):
       plan_arr.header.stamp = rospy.Time.now()
 
       for node in plan:
-        node = list (float (n) for n in node) + [0]
-        node[1] = self.map.info.height - node[1]
+        node = np.array ([[node[0], self.map.info.height - node[1], 0]], dtype='float64')
         node = Utils.map_to_world (node, self.map.info)
 
         pose = Pose ()
