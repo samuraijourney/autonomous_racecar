@@ -7,8 +7,10 @@ import sys
 import utils as Utils
 from ackermann_msgs.msg import AckermannDriveStamped
 from geometry_msgs.msg import PoseArray, PoseStamped
+from sensor_msg.msg import Image
 
 # Constants
+CAMERA_TOPIC = '/camera/color/image_raw'
 CMD_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0'
 PLAN_TOPIC = '/planner_node/car_plan'
 POSE_TOPIC = '/sim_car_pose/pose'
@@ -33,28 +35,35 @@ class Controller:
                         to the error in translation
     '''
     def __init__(self, kp, ki, kd, speed=1.0, plan_lookahead=1, translation_weight=1.0, rotation_weight=1.0):
-
-        # Store the passed parameters
-        self.plan = []
-        self.plan_lookahead = plan_lookahead
-
-        # Normalize translation and rotation weights
-        self.translation_weight = translation_weight / (translation_weight+rotation_weight)
-        self.rotation_weight = rotation_weight / (translation_weight+rotation_weight)
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-
-        # The error buff stores the ERROR_BUFF_LENGTH most recent errors and the
-        # times at which they were received. That is, each element is of the form
-        # [time_stamp (seconds), error].
+        self.avoid_waypoints = []
+        self.check_camera = False
+        self.cv_bridge = CvBridge()
         self.error_buff = collections.deque(maxlen=ERROR_BUFF_LENGTH)
         self.error_buff.append((0.0, 0.0))
         self.errors = []
+        self.kd = kd
+        self.ki = ki
+        self.kp = kp
+        self.plan = []
+        self.plan_lookahead = plan_lookahead
+        self.rotation_weight = rotation_weight / (translation_weight + rotation_weight)
         self.speed = speed
+        self.target_waypoints = []
+        self.translation_weight = translation_weight / (translation_weight + rotation_weight)
+        self.waypoint_reaction_distance = 2.0
 
+        self.camera_sub = rospy.Subscriber(CAMERA_TOPIC, Image, self.__camera_cb)
         self.cmd_pub = rospy.Publisher(CMD_TOPIC, AckermannDriveStamped, queue_size=10)
-        self.plan_sub = rospy.Subscriber(PLAN_TOPIC, PoseArray, self.plan_cb)
+        self.plan_sub = rospy.Subscriber(PLAN_TOPIC, PoseArray, self.__plan_cb)
+
+    def __camera_cb(self, msg):
+        try:
+            cv_image = self.cv_bridge.imgmsg_to_cv2(data, "bgr8")
+        except CvBridgeError as e:
+            print(e)
+
+        cv2.imshow("Image window", cv_image)
+        cv2.waitKey(3)
 
     '''
     Checks if the check_pose is located behind from the current pose
@@ -62,8 +71,8 @@ class Controller:
         check_pose: The pose to check if behind, represented as a numpy array [x,y,theta]
     Returns: True if the check_pose is behind the cur_pose, otherwise returns False.
     '''
-    def check_if_pose_behind(self, cur_pose, check_pose):
-        a, b = self.define_line_points(cur_pose, np.pi/2.0)
+    def __check_if_pose_behind(self, cur_pose, check_pose):
+        a, b = self.__define_line_points(cur_pose, np.pi/2.0)
         p = check_pose[0:2]
 
         return np.cross(p-a, b-a) > 0
@@ -74,8 +83,8 @@ class Controller:
         check_pose: The pose to check if to the right, represented as a numpy array [x,y,theta]
     Returns: True if the check_pose is right of cur_pose, otherwise returns False.
     '''
-    def check_if_pose_right(self, cur_pose, check_pose):
-        a, b = self.define_line_points(cur_pose, 0.0)
+    def __check_if_pose_right(self, cur_pose, check_pose):
+        a, b = self.__define_line_points(cur_pose, 0.0)
         p = check_pose[0:2]
 
         return np.cross(p-a, b-a) > 0
@@ -86,19 +95,40 @@ class Controller:
     Returns: (False, 0.0) if the end of the plan has been reached. Otherwise, returns
             (True, E) - where E is the computed error
     '''
-    def compute_error(self, cur_pose):
+    def __compute_error(self, cur_pose):
+
+        # First check if the waypoint error should override the path error
+        finished, error = self.__compute_waypoint_error(cur_pose)
+        if finished:
+            return (False, 0.0)
+        if not np.isnan(error):
+            return (True, error)
+
+        # Second check the path error since there is no waypoint override
+        finished, error = self.__compute_path_error(cur_pose)
+        if finished:
+            return (False, 0.0)
+        return (True, error)
+
+    '''
+    Computes the error based on the current pose of the car and the planned path
+        cur_pose: The current pose of the car, represented as a numpy array [x,y,theta]
+    Returns: (True, np.nan) if the end of the plan has been reached. Otherwise, returns
+            (False, E) - where E is the computed error
+    '''
+    def __compute_path_error(self, cur_pose):
 
         # Find the first element of the plan that is in front of the robot, and remove
         # any elements that are behind the robot.
         while len(self.plan) > 0:
-            if self.check_if_pose_behind(cur_pose, self.plan[0]):
+            if self.__check_if_pose_behind(cur_pose, self.plan[0]):
                 self.plan.pop(0)
             else:
                 break
 
         # Check if the plan is empty.
         if len(self.plan) == 0:
-            return (False, 0.0)
+            return (True, np.nan)
 
         # At this point, we have removed configurations from the plan that are behind
         # the robot. Therefore, element 0 is the first configuration in the plan that is in
@@ -111,7 +141,7 @@ class Controller:
         goal_pose = self.plan[goal_idx]
         pose_delta = goal_pose - cur_pose
         translation_error = np.linalg.norm(pose_delta[0:2])
-        if self.check_if_pose_right(cur_pose, goal_pose):
+        if self.__check_if_pose_right(cur_pose, goal_pose):
             translation_error *= -1
 
         # Compute the total error
@@ -120,19 +150,33 @@ class Controller:
         q1 = Utils.angle_to_quaternion(goal_pose[2])
         q2 = Utils.angle_to_quaternion(cur_pose[2])
         rotation_error = Utils.angle_between_quaternions(q2, q1)
-        print("Goal: " + str(goal_pose))
-        print("Cur: " + str(cur_pose))
-        print("Rotation Error: " + str(rotation_error) + ", Translation Error: " + str(translation_error))
         error = self.translation_weight * translation_error + self.rotation_weight * rotation_error
 
-        return True, error
+        return (False, error)
+
+    '''
+    Computes the error based on the current pose of the car and the waypoint position on camera
+        cur_pose: The current pose of the car, represented as a numpy array [x,y,theta]
+    Returns: (True, np.nan) if the end of the plan has been reached. Otherwise, returns
+            (False, E) - where E is the computed error, E can be np.nan
+    '''
+    def __compute_waypoint_error(self, cur_pose):
+        if not self.check_camera:
+            return (False, np.nan)
+
+        waypoint_info = self.__find_waypoint()
+        if waypoint_info is not None:
+            if self.__is_waypoint_within_distance(self.waypoint_reaction_distance):
+                # Compute error to get to visible waypoint and set error value here
+
+        return error
 
     '''
     Uses a PID control policy to generate a steering angle from the passed error
         error: The current error
     Returns: The steering angle that should be executed
     '''
-    def compute_steering_angle(self, error):
+    def __compute_steering_angle(self, error):
         now = rospy.Time.now().to_sec() # Get the current time
 
         # Compute the derivative error using the passed error, the current time,
@@ -146,7 +190,7 @@ class Controller:
 
         # Compute the integral error by applying rectangular integration to the elements
         # of self.error_buff: https://chemicalstatistician.wordpress.com/2014/01/20/rectangular-integration-a-k-a-the-midpoint-rule/
-        integ_error = (now-last_error[1])*(error+last_error[0])/2.0
+        integ_error = (now - last_error[1]) * (error + last_error[0]) / 2.0
 
         # Compute the steering angle as the sum of the pid errors
         print("Error: " + str(error) + ", Integ Error: " + str(integ_error) + ", Deriv Error: " + str(deriv_error))
@@ -158,44 +202,58 @@ class Controller:
         rotation_offset: The rotation offset from the current pose theta in radians
     Returns: (a, b) 2 points on the line
     '''
-    def define_line_points(self, cur_pose, rotation_offset=0.0):
+    def __define_line_points(self, cur_pose, rotation_offset=0.0):
         a = cur_pose[0:2]
         offset_vector = np.array([1, 0])
-        rot_matrix = Utils.rotation_matrix(cur_pose[2]-rotation_offset)
+        rot_matrix = Utils.rotation_matrix(cur_pose[2] - rotation_offset)
         b = np.add(a, np.dot(rot_matrix, offset_vector))
 
         return a, b
 
     '''
+    Searches the camera frame for a waypoint marker
+    Returns: [location: (x,y), target: True/False] metadata info for waypoint or None if nothing was found
+    '''
+    def __find_waypoint(self):
+        return None
+
+    '''
+    Matches waypoint_info to a waypoint based on closest cached avoid/target waypoints and determines if it is
+    within the specified distance to the robot
+    Returns: True/False
+    '''
+    def __is_waypoint_within_distance(self, waypoint_info, distance=2.0):
+        return False
+
+    '''
     Callback for the path plan
         msg: A PoseArray defining all the poses for the path plan
     '''
-    def plan_cb(self, msg):
+    def __plan_cb(self, msg):
         self.plan = []
         for pose in msg.poses:
             self.plan.append([msg.pose.position.x,
                               msg.pose.position.y,
                               Utils.quaternion_to_angle(msg.pose.orientation)])
 
-        self.pose_sub = rospy.Subscriber(POSE_TOPIC, PoseStamped, self.pose_cb)
+        self.pose_sub = rospy.Subscriber(POSE_TOPIC, PoseStamped, self.__pose_cb)
 
     '''
     Callback for the current pose of the car
         msg: A PoseStamped representing the current pose of the car
     '''
-    def pose_cb(self, msg):
+    def __pose_cb(self, msg):
         cur_pose = np.array([msg.pose.position.x,
                              msg.pose.position.y,
                              Utils.quaternion_to_angle(msg.pose.orientation)])
 
-        success, error = self.compute_error(cur_pose)
+        success, error = self.__compute_error(cur_pose)
         self.errors.append(error)
-
         if not success:
             self.pose_sub = None
             self.speed = 0.0
 
-        delta = self.compute_steering_angle(error)
+        delta = self.__compute_steering_angle(error)
 
         # Setup the control message
         ads = AckermannDriveStamped()
@@ -206,6 +264,17 @@ class Controller:
 
         # Send the control message
         self.cmd_pub.publish(ads)
+
+    def set_avoid_waypoints(self, waypoints):
+        self.check_camera = True
+        self.avoid_waypoints = waypoints
+
+    def set_waypoint_reaction_distance(self, distance):
+        self.waypoint_reaction_distance = distance
+
+    def set_target_waypoints(self, waypoints):
+        self.check_camera = True
+        self.target_waypoints = waypoints
 
 if __name__ == '__main__':
     rospy.init_node('controller', anonymous=True) # Initialize the node
