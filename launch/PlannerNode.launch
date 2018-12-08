@@ -1,0 +1,4 @@
+<launch>
+  <!-- <node pkg="final" type="PlannerNode.py" name="planner_node" output="screen" launch-prefix="xterm -e python -m pdb"/> -->
+  <node pkg="final" type="PlannerNode.py" name="planner_node" output="screen"/>
+</launch>

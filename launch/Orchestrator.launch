@@ -1,0 +1,4 @@
+<launch>
+  <!-- <node pkg="final" type="Orchestrator.py" name="orchestrator_node" output="screen" launch-prefix="xterm -e python -m pdb"/> -->
+  <node pkg="final" type="Orchestrator.py" name="orchestrator_node" output="screen"/>
+</launch>
