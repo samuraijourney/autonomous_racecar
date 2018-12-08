@@ -160,7 +160,8 @@ class PlannerNode(object):
     source = np.array ([[req.poses[0].position.x, req.poses[0].position.y, req.poses[0].position.z]], dtype='float64')
     target = np.array ([req.poses[1].position.x, req.poses[1].position.y], dtype="int").reshape (2)
 
-    source = Utils.world_to_map (source, self.map.info)[:,2]
+    Utils.world_to_map (source, self.map.info)
+    source = np.array([source[0,0], source[0,1]], dtype='int64')
 
     plan = Astar.generate_plan (self.prm, source, target)
 
@@ -173,8 +174,9 @@ class PlannerNode(object):
       plan_arr.header.stamp = rospy.Time.now()
 
       for node in plan:
-        node = np.array ([[node[0], self.map.info.height - node[1], 0]], dtype='float64')
-        node = Utils.map_to_world (node, self.map.info)
+        node = np.array ([[node[0], node[1], 0]], dtype='float64')
+        Utils.map_to_world (node, self.map.info)
+        node = np.array([node[0,0], node[0,1]], dtype='float64')
 
         pose = Pose ()
         pose.position.x = node[0]
@@ -182,7 +184,7 @@ class PlannerNode(object):
         pose.position.z = 0
 
         if len (plan_arr.poses) > 1:
-          theta = np.arctan2 (plan_arr.poses[-1].position.y - pose.position.y, plan_arr.poses[-1].position.x - pose.position.x)
+          theta = np.arctan2 (pose.position.y - plan_arr.poses[-1].position.y, pose.position.x - plan_arr.poses[-1].position.x)
           plan_arr.poses[-1].orientation = Utils.angle_to_quaternion (theta)
 
         plan_arr.poses.append (pose)
