@@ -23,12 +23,25 @@ def angle_to_quaternion(angle):
 '''
   Convert a quaternion message into a yaw angle in radians.
     q: A geometry_msgs/Quaternion message
-    Returns: The equivalent yaw angle 
+    Returns: The equivalent yaw angle
 '''
 def quaternion_to_angle(q):
     x, y, z, w = q.x, q.y, q.z, q.w
     roll, pitch, yaw = tf.transformations.euler_from_quaternion((x, y, z, w))
     return yaw
+
+'''
+Compute the angle between 2 quaternions.
+In:
+  q1: Quaternion message number 1
+  q2: Quaternion message number 2
+Out:
+  The angle between the 2 quaternions in radians
+'''
+def angle_between_quaternions(q1, q2):
+    q1_inverse = tf.transformations.quaternion_inverse((q1.x, q1.y, q1.z, q1.w))
+    q_delta = tf.transformations.quaternion_multiply((q2.x, q2.y, q2.z, q2.w), q1_inverse)
+    return quaternion_to_angle(Quaternion(*q_delta))
 
 '''
   Constructs a rotation matrix from a given angle in radians
@@ -97,23 +110,23 @@ def points(arr):
 In:
   map_topic: The service topic that will provide the map
 Out:
-  map_img: A numpy array with dimensions (map_info.height, map_info.width). 
+  map_img: A numpy array with dimensions (map_info.height, map_info.width).
            A zero at a particular location indicates that the location is impermissible
            A one at a particular location indicates that the location is permissible
   map_info: Info about the map, see
-            http://docs.ros.org/kinetic/api/nav_msgs/html/msg/MapMetaData.html 
-            for more info    
+            http://docs.ros.org/kinetic/api/nav_msgs/html/msg/MapMetaData.html
+            for more info
 '''
 def get_map(map_topic):
   rospy.wait_for_service(map_topic)
   map_msg = rospy.ServiceProxy(map_topic, GetMap)().map
   array_255 = np.array(map_msg.data).reshape((map_msg.info.height, map_msg.info.width))
   map_img = np.zeros_like(array_255, dtype=bool)
-  map_img[array_255==0] = 1 
-  
+  map_img[array_255==0] = 1
+
   return map_img, map_msg.info
 
-''' 
+'''
 Convert an array of pixel locations in the map to poses in the world. Does computations
 in-place
   poses: Pixel poses in the map. Should be a nx3 numpy array
@@ -125,7 +138,7 @@ def map_to_world(poses,map_info):
 
     # Rotation
     c, s = np.cos(angle), np.sin(angle)
-    
+
     # Store the x coordinates since they will be overwritten
     temp = np.copy(poses[:,0])
     poses[:,0] = c*poses[:,0] - s*poses[:,1]
@@ -139,13 +152,13 @@ def map_to_world(poses,map_info):
     poses[:,1] += map_info.origin.position.y
     poses[:,2] += angle
 
-''' 
-Convert array of poses in the world to pixel locations in the map image 
+'''
+Convert array of poses in the world to pixel locations in the map image
   pose: The poses in the world to be converted. Should be a nx3 numpy array
   map_info: Info about the map (returned by get_map)
-'''    
+'''
 def world_to_map(poses, map_info):
-   
+
     scale = map_info.resolution
     angle = -quaternion_to_angle(map_info.origin.orientation)
 
@@ -158,7 +171,7 @@ def world_to_map(poses, map_info):
 
     # Rotation
     c, s = np.cos(angle), np.sin(angle)
-    
+
     # Store the x coordinates since they will be overwritten
     temp = np.copy(poses[:,0])
     poses[:,0] = c*poses[:,0] - s*poses[:,1]

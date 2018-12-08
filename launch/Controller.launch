@@ -1,0 +1,9 @@
+<launch>
+
+   <!--
+	Launch a controller node here
+   -->
+
+   <node name="controller" pkg="final" type="Controller.py" output="screen"/>
+
+</launch>

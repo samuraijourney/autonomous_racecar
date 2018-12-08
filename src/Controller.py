@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 
 import collections
+import cv2
 import numpy as np
 import rospy
 import sys
-import utils as Utils
+import Utils
 from ackermann_msgs.msg import AckermannDriveStamped
+from cv_bridge import CvBridge, CvBridgeError
 from geometry_msgs.msg import PoseArray, PoseStamped
-from sensor_msg.msg import Image
+from sensor_msgs.msg import Image
 
 # Constants
 CAMERA_TOPIC = '/camera/color/image_raw'
@@ -37,7 +39,9 @@ class Controller:
     def __init__(self, kp, ki, kd, speed=1.0, plan_lookahead=1, translation_weight=1.0, rotation_weight=1.0):
         self.avoid_waypoints = []
         self.check_camera = False
+        self.cur_pose = None
         self.cv_bridge = CvBridge()
+        self.desired_speed = speed
         self.error_buff = collections.deque(maxlen=ERROR_BUFF_LENGTH)
         self.error_buff.append((0.0, 0.0))
         self.errors = []
@@ -45,9 +49,10 @@ class Controller:
         self.ki = ki
         self.kp = kp
         self.plan = []
+        self.plan_ignore_threshold = 0.1
         self.plan_lookahead = plan_lookahead
         self.rotation_weight = rotation_weight / (translation_weight + rotation_weight)
-        self.speed = speed
+        self.speed = 0.0
         self.target_waypoints = []
         self.translation_weight = translation_weight / (translation_weight + rotation_weight)
         self.waypoint_reaction_distance = 2.0
@@ -55,10 +60,11 @@ class Controller:
         self.camera_sub = rospy.Subscriber(CAMERA_TOPIC, Image, self.__camera_cb)
         self.cmd_pub = rospy.Publisher(CMD_TOPIC, AckermannDriveStamped, queue_size=10)
         self.plan_sub = rospy.Subscriber(PLAN_TOPIC, PoseArray, self.__plan_cb)
+        self.pose_sub = rospy.Subscriber(POSE_TOPIC, PoseStamped, self.__pose_cb)
 
     def __camera_cb(self, msg):
         try:
-            cv_image = self.cv_bridge.imgmsg_to_cv2(data, "bgr8")
+            cv_image = self.cv_bridge.imgmsg_to_cv2(msg, "bgr8")
         except CvBridgeError as e:
             print(e)
 
@@ -92,23 +98,18 @@ class Controller:
     '''
     Computes the error based on the current pose of the car
         cur_pose: The current pose of the car, represented as a numpy array [x,y,theta]
-    Returns: (False, 0.0) if the end of the plan has been reached. Otherwise, returns
-            (True, E) - where E is the computed error
+    Returns: (True, np.nan) if the end of the plan has been reached. Otherwise, returns
+            (False, E) - where E is the computed error
     '''
     def __compute_error(self, cur_pose):
 
         # First check if the waypoint error should override the path error
         finished, error = self.__compute_waypoint_error(cur_pose)
-        if finished:
-            return (False, 0.0)
-        if not np.isnan(error):
-            return (True, error)
+        if finished or (not np.isnan(error)):
+            return (finished, error)
 
         # Second check the path error since there is no waypoint override
-        finished, error = self.__compute_path_error(cur_pose)
-        if finished:
-            return (False, 0.0)
-        return (True, error)
+        return self.__compute_path_error(cur_pose)
 
     '''
     Computes the error based on the current pose of the car and the planned path
@@ -165,11 +166,11 @@ class Controller:
             return (False, np.nan)
 
         waypoint_info = self.__find_waypoint()
-        if waypoint_info is not None:
-            if self.__is_waypoint_within_distance(self.waypoint_reaction_distance):
+        #if waypoint_info is not None:
+        #    if self.__is_waypoint_within_distance(self.waypoint_reaction_distance):
                 # Compute error to get to visible waypoint and set error value here
 
-        return error
+        return (False, np.nan)
 
     '''
     Uses a PID control policy to generate a steering angle from the passed error
@@ -193,7 +194,7 @@ class Controller:
         integ_error = (now - last_error[1]) * (error + last_error[0]) / 2.0
 
         # Compute the steering angle as the sum of the pid errors
-        print("Error: " + str(error) + ", Integ Error: " + str(integ_error) + ", Deriv Error: " + str(deriv_error))
+        #print("Error: " + str(error) + ", Integ Error: " + str(integ_error) + ", Deriv Error: " + str(deriv_error))
         return self.kp*error + self.ki*integ_error + self.kd*deriv_error
 
     '''
@@ -230,13 +231,29 @@ class Controller:
         msg: A PoseArray defining all the poses for the path plan
     '''
     def __plan_cb(self, msg):
+        start_pose = [msg.poses[0].position.x,
+                      msg.poses[0].position.y]
+
+        # Ignore provided plan if uncertain about current location
+        if self.cur_pose is None:
+            print("Ignoring received plan, do not know current position")
+            return
+
+        # Ignore provided plan if current location is to far from start location
+        pose_delta = start_pose - self.cur_pose[0:2]
+        distance = np.linalg.norm(pose_delta)
+        if distance > self.plan_ignore_threshold:
+            print("Ignoring received plan, start position is to far from current")
+            return
+
         self.plan = []
         for pose in msg.poses:
-            self.plan.append([msg.pose.position.x,
-                              msg.pose.position.y,
-                              Utils.quaternion_to_angle(msg.pose.orientation)])
+            self.plan.append([pose.position.x,
+                              pose.position.y,
+                              Utils.quaternion_to_angle(pose.orientation)])
 
-        self.pose_sub = rospy.Subscriber(POSE_TOPIC, PoseStamped, self.__pose_cb)
+        self.speed = self.desired_speed
+        print("New received plan has been set")
 
     '''
     Callback for the current pose of the car
@@ -247,10 +264,16 @@ class Controller:
                              msg.pose.position.y,
                              Utils.quaternion_to_angle(msg.pose.orientation)])
 
+        self.cur_pose = cur_pose
         success, error = self.__compute_error(cur_pose)
+        if np.isnan(error):
+            error = 0.0
+
         self.errors.append(error)
-        if not success:
-            self.pose_sub = None
+        if (self.speed == self.desired_speed) and (success == True):
+            print("Plan complete!")
+
+        if success:
             self.speed = 0.0
 
         delta = self.__compute_steering_angle(error)
