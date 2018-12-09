@@ -38,21 +38,21 @@ def fatten_map (map, radius):
   for y in range (radius, map.info.height - radius):
     for x in range (radius, map.info.width - radius):
       if map.data[x + y * map.info.width] == 0:
-        if (map.data[(x - 1) + y * map.info.width] > 0 and map.data[(x - 1) + y * map.info.width] != 92):
-          for x2 in range (x, radius):
-            data[x2 + y * map.info.width] = 92
+        if (map.data[(x - 1) + y * map.info.width] > 0 and map.data[(x - 1) + y * map.info.width] != 50):
+          for x2 in range (x, x + radius):
+            data[x2 + y * map.info.width] = 50
 
-        if (map.data[(x + 1) + y * map.info.width] > 0 and map.data[(x + 1) + y * map.info.width] != 92):
+        if (map.data[(x + 1) + y * map.info.width] > 0 and map.data[(x + 1) + y * map.info.width] != 50):
           for x2 in range (x - radius, x):
-            data[x2 + y * map.info.width] = 92
+            data[x2 + y * map.info.width] = 50
 
-        if (map.data[x + (y - 1) * map.info.width] > 0 and map.data[x + (y - 1) * map.info.width] != 92):
-          for y2 in range (y, radius):
-            data[x + y2 * map.info.width] = 92
+        if (map.data[x + (y - 1) * map.info.width] > 0 and map.data[x + (y - 1) * map.info.width] != 50):
+          for y2 in range (y, y + radius):
+            data[x + y2 * map.info.width] = 50
 
-        if (map.data[x + (y + 1) * map.info.width] > 0 and map.data[x + (y + 1) * map.info.width] != 92):
+        if (map.data[x + (y + 1) * map.info.width] > 0 and map.data[x + (y + 1) * map.info.width] != 50):
           for y2 in range (y - radius, y):
-            data[x + y2 * map.info.width] = 92
+            data[x + y2 * map.info.width] = 50
       else:
         data[x + y * map.info.width] = 100
 
@@ -74,7 +74,7 @@ class PlannerNode(object):
 
     print("Getting map from service: " + map_service_name)
 
-    self.map = fatten_map (self.map_msg, 30)
+    self.map = fatten_map (self.map_msg, 20)
     self.map_pub.publish (self.map)
 
     print("Done beefening map")
@@ -157,13 +157,12 @@ class PlannerNode(object):
     if len (req.poses) != 2:
       return
 
-    source = np.array (req.poses[0].position)
-    target = np.array ([req.poses[1].position.x, req.poses[1].position.y]).reshape (2)
+    source = np.array ([[req.poses[0].position.x, req.poses[0].position.y, req.poses[0].position.z]], dtype='float64')
+    target = np.array ([req.poses[1].position.x, req.poses[1].position.y], dtype="int").reshape (2)
 
-    source = Utils.world_to_map ([source], self.map.info)[0]
+    Utils.world_to_map (source, self.map.info)
+    source = np.array([source[0,0], source[0,1]], dtype='int64')
 
-    print(source)
-    print(target)
     plan = Astar.generate_plan (self.prm, source, target)
 
     if plan:
@@ -175,9 +174,9 @@ class PlannerNode(object):
       plan_arr.header.stamp = rospy.Time.now()
 
       for node in plan:
-        node = list (float (n) for n in node) + [0]
-        node[1] = self.map.info.height - node[1]
-        node = Utils.map_to_world (node, self.map.info)
+        node = np.array ([[node[0], node[1], 0]], dtype='float64')
+        Utils.map_to_world (node, self.map.info)
+        node = np.array([node[0,0], node[0,1]], dtype='float64')
 
         pose = Pose ()
         pose.position.x = node[0]
@@ -185,7 +184,7 @@ class PlannerNode(object):
         pose.position.z = 0
 
         if len (plan_arr.poses) > 1:
-          theta = np.arctan2 (plan_arr.poses[-1].position.y - pose.position.y, plan_arr.poses[-1].position.x - pose.position.x)
+          theta = np.arctan2 (pose.position.y - plan_arr.poses[-1].position.y, pose.position.x - plan_arr.poses[-1].position.x)
           plan_arr.poses[-1].orientation = Utils.angle_to_quaternion (theta)
 
         plan_arr.poses.append (pose)
