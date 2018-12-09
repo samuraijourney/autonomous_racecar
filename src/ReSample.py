@@ -34,23 +34,6 @@ class ReSampler:
   def resample_naiive(self):
     self.state_lock.acquire()
 
-    # YOUR CODE HERE
-    M = self.particles.shape[0]
-    indices = np.arange(M)
-    indices = np.random.choice(indices, M)
-    self.particles[:,:] = self.particles[indices,:]
-    self.weights[:] = 1 / float(M)
-
-    self.state_lock.release()
-
-  '''
-    Performs in-place, lower variance sampling of particles
-    (As discussed on pg 110 of Probabilistic Robotics)
-  '''
-  def resample_low_variance(self):
-    self.state_lock.acquire()
-
-    # YOUR CODE HERE
     M = self.particles.shape[0]
     sum = np.sum(self.weights)
     c = np.cumsum(self.weights)
@@ -62,6 +45,29 @@ class ReSampler:
           m = j
           break
       self.particles[i,:] = self.particles[m,:]
+    self.weights[:] = 1 / float(M)
+
+    self.state_lock.release()
+
+  '''
+    Performs in-place, lower variance sampling of particles
+    (As discussed on pg 110 of Probabilistic Robotics)
+  '''
+  def resample_low_variance(self):
+    self.state_lock.acquire()
+
+    M = len(self.particles[:,0])
+    x = np.zeros(M)
+    r = np.random.uniform(0, 1.0/M)
+    c = self.weights[1]
+    i = 1
+    for m in range(1,M):
+      U = r + (m-1) / float(M)
+      while U > c:
+        i += 1
+        if i == M: i -= 1
+        c += self.weights[i]
+      self.particles[m,:] = self.particles[i,:]
     self.weights[:] = 1 / float(M)
 
     self.state_lock.release()
