@@ -180,20 +180,13 @@ class ParticleFilter():
       https://en.wikipedia.org/wiki/Mean_of_circular_quantities
   '''
   def expected_pose(self):
-    # YOUR CODE HERE
-    s = np.average(np.sin(self.particles[:,2]))
-    c = np.average(np.cos(self.particles[:,2]))
-    theta = np.arctan(s/c)
+    pose = np.zeros(3)
+    pose[0] = np.dot(self.particles[:,0], self.weights)
+    pose[1] = np.dot(self.particles[:,1], self.weights)
+    pose[2] = np.arctan2(np.sum(np.sin(self.particles[:,2])),
+                         np.sum(np.cos(self.particles[:,2])))
 
-    if c < 0:
-      theta += np.pi
-    elif (c > 0) and (s < 0):
-      theta += 2*np.pi
-
-    x = np.dot(self.weights, self.particles[:,0])
-    y = np.dot(self.weights, self.particles[:,1])
-
-    return np.array([x, y, theta])
+    return pose
 
   '''
     Callback for '/initialpose' topic. RVIZ publishes a message to this topic when you specify an initial pose
