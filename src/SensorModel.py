@@ -15,12 +15,13 @@ from scipy.stats import norm
 THETA_DISCRETIZATION = 112 # Discretization of scanning angle
 INV_SQUASH_FACTOR = 0.2    # Factor for helping the weight distribution to be less peaked
 
-# YOUR CODE HERE (Set these values and use them in precompute_sensor_model)
-Z_SHORT = 0.15  # Weight for short reading
-Z_MAX = 0.15    # Weight for max reading
-Z_RAND = 0.15   # Weight for random reading
+Z_SHORT = 0.10  # Weight for short reading
+Z_MAX = 0.10    # Weight for max reading
+Z_RAND = 0.10   # Weight for random reading
 SIGMA_HIT = 5   # Noise value for hit reading
-Z_HIT = 0.55    # Weight for hit reading
+Z_HIT = 0.70    # Weight for hit reading
+
+LAMBDA_SHORT = 1.0
 
 '''
   Weights particles according to their agreement with the observed data
@@ -136,7 +137,7 @@ class SensorModel:
     # Note that the 'self' parameter is completely unused in this function
 
     dists = np.linspace(0, table_width - 1, table_width)
-    short = 1
+    short = LAMBDA_SHORT
 
     for d in xrange(table_width):
       phit = norm.pdf(d, dists, SIGMA_HIT)
