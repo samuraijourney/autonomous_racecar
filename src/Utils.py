@@ -6,6 +6,7 @@ import numpy as np
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, Pose, PoseStamped, PoseArray, Quaternion, PolygonStamped,Polygon, Point32, PoseWithCovarianceStamped, PointStamped
+from nav_msgs.srv import GetMap
 import tf.transformations
 import tf
 import matplotlib.pyplot as plt

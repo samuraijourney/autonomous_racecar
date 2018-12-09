@@ -26,7 +26,7 @@ AVOID_COLOR_UPPER_BOUND = np.array([11,109,272])
 CAMERA_FOV = 69.4 # horizontal FOV in degrees
 ERROR_BUFF_LENGTH = 10
 PLAN_IGNORE_THRESHOLD = 0.1 # metres
-TARGET_WAYPOINTS = np.array([[2600,660,0], [1880,440,0], [1435,545,0], [1250,460,0], [540,835,0]]) # pixels
+TARGET_WAYPOINTS = np.array([[2600,660,0], [1880,440,0], [1435,545,0], [1250,460,0], [540,835,0]], dtype='float64') # pixels
 TARGET_COLOR_LOWER_BOUND = np.array([95,130,135])
 TARGET_COLOR_UPPER_BOUND = np.array([115,150,215])
 TARGET_REACH_Y_GOAL_THRESHOLD = 0.9 # threshold for target Y position to consider a point reached
@@ -52,10 +52,8 @@ class Controller:
                         to the error in translation
     '''
     def __init__(self, kp, ki, kd, speed=1.0, plan_lookahead=1, translation_weight=1.0, rotation_weight=1.0):
-        print("Getting map from service: ", MAP_TOPIC)
-        rospy.wait_for_service(MAP_TOPIC)
-        map_info = rospy.ServiceProxy(MAP_TOPIC, GetMap)().map.info
-        print("Received a map")
+        _, map_info = Utils.get_map(MAP_TOPIC)
+        Utils.map_to_world(TARGET_WAYPOINTS, map_info)
 
         self.cur_pose = None
         self.cv_bridge = CvBridge()
@@ -73,7 +71,7 @@ class Controller:
         self.rotation_weight = rotation_weight / (translation_weight + rotation_weight)
         self.speed = 0.0
         self.target_waypoint_position = None
-        self.target_waypoints = Utils.map_to_world(TARGET_WAYPOINTS, map_info)[:,:2]
+        self.target_waypoints = TARGET_WAYPOINTS[:,:2]
         self.translation_weight = translation_weight / (translation_weight + rotation_weight)
 
         self.camera_avoid_pub = rospy.Publisher(CAMERA_AVOID_WAYPOINT_TOPIC, Image, queue_size=10)
@@ -226,13 +224,18 @@ class Controller:
                                                                                      cur_pose,
                                                                                      self.target_waypoint_position)
 
-            if (selected_waypoint is not None) and (dist < WAYPOINT_REACTION_DISTANCE):
+            if (selected_waypoint is not None):
+                if dist < WAYPOINT_REACTION_DISTANCE:
 
-                # Consider the waypoint reached if the Y position on the screen exceeds the goal threshold
-                if self.target_waypoint_position[1] > (TARGET_REACH_Y_GOAL_THRESHOLD * self.image_height):
-                    return (True, np.nan)
+                    # Consider the waypoint reached if the Y position on the screen exceeds the goal threshold
+                    if self.target_waypoint_position[1] > (TARGET_REACH_Y_GOAL_THRESHOLD * self.image_height):
+                        return (True, np.nan)
+                    else:
+                        return (False, degree_offset * WAYPOINT_OFFSET_GAIN)
                 else:
-                    return (False, degree_offset * WAYPOINT_OFFSET_GAIN)
+                    print("Suitable waypoint found but it is to far away, ignoring it")
+            else:
+                print("No suitable waypoint could be found based on current position")
 
         return (False, np.nan)
 
