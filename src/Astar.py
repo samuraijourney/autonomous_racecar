@@ -5,7 +5,7 @@ import Utils
 def generate_plan (prm, source, target):
     if not prm.add_vertex_to_graph (source):
         return None
-    
+
     if not prm.add_vertex_to_graph (target):
         return None
 
@@ -41,7 +41,8 @@ def generate_plan (prm, source, target):
     plan = [target]
 
     while past_nodes and curr_node != source:
-        curr_node = past_nodes.pop (curr_node) 
+        curr_node = past_nodes.pop (curr_node)
         plan.append (curr_node)
 
+    plan.reverse()
     return plan

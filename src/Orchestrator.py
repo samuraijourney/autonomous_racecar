@@ -41,7 +41,7 @@ class OrchestratorNode (object):
     return (len (self.waypoints) == 0)
 
   def complete_wp (self, curr_pose):
-    self.waypoints.pop (self.curr_target)
+    self.waypoints.pop (0)
 
 if __name__ == '__main__':
   rospy.init_node ('orchestrator_node', anonymous=True)
