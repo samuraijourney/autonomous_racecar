@@ -19,6 +19,7 @@ CMD_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0'
 MAP_TOPIC = 'static_map'
 PLAN_TOPIC = '/planner_node/car_plan'
 POSE_TOPIC = '/sim_car_pose/pose'
+TARGET_REACHED_TOPIC = '/controller/target_reached'
 
 # Constants
 AVOID_COLOR_LOWER_BOUND = np.array([-9,89,192])
@@ -80,6 +81,7 @@ class Controller:
         self.cmd_pub = rospy.Publisher(CMD_TOPIC, AckermannDriveStamped, queue_size=10)
         self.plan_sub = rospy.Subscriber(PLAN_TOPIC, PoseArray, self.__plan_cb)
         self.pose_sub = rospy.Subscriber(POSE_TOPIC, PoseStamped, self.__pose_cb)
+        self.target_reached_pub = rospy.Publisher(TARGET_REACHED_TOPIC, PoseStamped, queue_size=10)
 
     def __camera_cb(self, msg):
         self.image_height = msg.height
@@ -357,6 +359,12 @@ class Controller:
 
         self.errors.append(error)
         if (self.speed == self.desired_speed) and (success == True):
+            ps = PoseStamped()
+            ps.header = Utils.make_header("map")
+            ps.pose.position.x = cur_pose[0]
+            ps.pose.position.y = cur_pose[1]
+            ps.pose.orientation = Utils.angle_to_quaternion(cur_pose[2])
+            self.target_reached_pub.publish(ps)
             print("Plan complete!")
 
         if success:
