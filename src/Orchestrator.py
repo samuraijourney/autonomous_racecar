@@ -30,6 +30,13 @@ class OrchestratorNode (object):
 
     Utils.map_to_world(self.waypoints, map_info)
 
+    for i in range(1,len(self.waypoints)):
+      theta = np.arctan2(self.waypoints[i, 1] - self.waypoints[i-1, 1], self.waypoints[i, 0] - self.waypoints[i-1, 0])
+      self.waypoints[i-1, 2] = theta
+
+    self.waypoints[0,2] = np.deg2rad(100)
+    self.waypoints[-1,2] = np.pi
+
     self.pose_cb(rospy.wait_for_message(LOCALIZATION_TOPIC, PoseStamped))
 
     self.pose_sub = rospy.Subscriber(LOCALIZATION_TOPIC, PoseStamped, self.pose_cb)
@@ -50,7 +57,7 @@ class OrchestratorNode (object):
       self.plan_next_wp()
 
   def done (self):
-    return (self.waypoints.size == self.waypoint_index)
+    return (self.waypoints.shape[0] == self.waypoint_index)
 
   def plan_next_wp (self):
     if not self.done():
@@ -75,6 +82,7 @@ class OrchestratorNode (object):
       target_msg.pose = Pose()
       target_msg.pose.position.x = self.curr_target[0]
       target_msg.pose.position.y = self.curr_target[1]
+      target_msg.pose.orientation = Utils.angle_to_quaternion(self.curr_target[2])
       self.target_pub.publish(target_msg)
 
   def pose_cb(self, msg):
