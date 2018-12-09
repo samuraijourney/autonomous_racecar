@@ -17,7 +17,7 @@ CAMERA_TOPIC = '/camera/color/image_raw'
 CAMERA_TARGET_WAYPOINT_TOPIC = '/controller/camera/target'
 CMD_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0'
 MAP_TOPIC = 'static_map'
-PLAN_TOPIC = '/plan'
+PLAN_TOPIC = '/planner_node/car_plan'
 POSE_TOPIC = '/pf/viz/inferred_pose'
 TARGET_REACHED_TOPIC = '/controller/target_reached'
 
@@ -26,7 +26,7 @@ AVOID_COLOR_LOWER_BOUND = np.array([-9,89,192])
 AVOID_COLOR_UPPER_BOUND = np.array([11,109,272])
 CAMERA_FOV = 69.4 # horizontal FOV in degrees
 ERROR_BUFF_LENGTH = 10
-PLAN_IGNORE_THRESHOLD = 0.1 # metres
+PLAN_IGNORE_THRESHOLD = 1.0 # metres
 TARGET_WAYPOINTS = np.array([[2600,660,0], [1880,440,0], [1435,545,0], [1250,460,0], [540,835,0]], dtype='float64') # pixels
 TARGET_COLOR_LOWER_BOUND = np.array([95,130,135])
 TARGET_COLOR_UPPER_BOUND = np.array([115,150,215])
