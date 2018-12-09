@@ -12,7 +12,9 @@ from geometry_msgs.msg import PoseArray, PoseStamped
 from sensor_msgs.msg import Image
 
 # Constants
+CAMERA_AVOID_WAYPOINT_TOPIC = '/controller/camera/avoid'
 CAMERA_TOPIC = '/camera/color/image_raw'
+CAMERA_TARGET_WAYPOINT_TOPIC = '/controller/camera/target'
 CMD_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0'
 PLAN_TOPIC = '/planner_node/car_plan'
 POSE_TOPIC = '/sim_car_pose/pose'
@@ -37,7 +39,9 @@ class Controller:
                         to the error in translation
     '''
     def __init__(self, kp, ki, kd, speed=1.0, plan_lookahead=1, translation_weight=1.0, rotation_weight=1.0):
+        self.avoid_waypoint_position = None
         self.avoid_waypoints = []
+        self.avoid_waypoint_thresholds = np.array([[-9,89,192],[11,109,272]])
         self.check_camera = False
         self.cur_pose = None
         self.cv_bridge = CvBridge()
@@ -53,11 +57,15 @@ class Controller:
         self.plan_lookahead = plan_lookahead
         self.rotation_weight = rotation_weight / (translation_weight + rotation_weight)
         self.speed = 0.0
+        self.target_waypoint_position = None
+        self.target_waypoint_thresholds = np.array([[95,130,135],[115,150,215]])
         self.target_waypoints = []
         self.translation_weight = translation_weight / (translation_weight + rotation_weight)
         self.waypoint_reaction_distance = 2.0
 
+        self.camera_avoid_pub = rospy.Publisher(CAMERA_AVOID_WAYPOINT_TOPIC, Image, queue_size=10)
         self.camera_sub = rospy.Subscriber(CAMERA_TOPIC, Image, self.__camera_cb)
+        self.camera_target_pub = rospy.Publisher(CAMERA_TARGET_WAYPOINT_TOPIC, Image, queue_size=10)
         self.cmd_pub = rospy.Publisher(CMD_TOPIC, AckermannDriveStamped, queue_size=10)
         self.plan_sub = rospy.Subscriber(PLAN_TOPIC, PoseArray, self.__plan_cb)
         self.pose_sub = rospy.Subscriber(POSE_TOPIC, PoseStamped, self.__pose_cb)
@@ -68,8 +76,44 @@ class Controller:
         except CvBridgeError as e:
             print(e)
 
-        cv2.imshow("Image window", cv_image)
-        cv2.waitKey(3)
+        hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+        target_mask = cv2.inRange(hsv, self.target_waypoint_thresholds[0], self.target_waypoint_thresholds[1])
+        avoid_mask = cv2.inRange(hsv, self.avoid_waypoint_thresholds[0], self.avoid_waypoint_thresholds[1])
+        target_image = cv2.bitwise_and(cv_image, cv_image, mask=target_mask)
+        avoid_image = cv2.bitwise_and(cv_image, cv_image, mask=avoid_mask)
+
+        if target_mask[target_mask > 0].size > 0:
+            m = cv2.moments(target_mask)
+            x = int(m["m10"] / m["m00"])
+            y = int(m["m01"] / m["m00"])
+            self.target_waypoint_position = np.array([x,y])
+            cv2.circle(target_image, (x,y), 5, (255, 255, 255), -1)
+        else:
+            self.target_waypoint_position = None
+
+        if avoid_mask[avoid_mask > 0].size > 0:
+            m = cv2.moments(avoid_mask)
+            x = int(m["m10"] / m["m00"])
+            y = int(m["m01"] / m["m00"])
+            self.avoid_waypoint_position = np.array([x,y])
+            cv2.circle(avoid_image, (x,y), 5, (255, 255, 255), -1)
+        else:
+            self.avoid_waypoint_position = None
+
+        try:
+            avoid_image_msg = self.cv_bridge.cv2_to_imgmsg(avoid_image, "bgr8")
+            target_image_msg = self.cv_bridge.cv2_to_imgmsg(target_image, "bgr8")
+            print("Publishing frames")
+            self.camera_avoid_pub.publish(avoid_image_msg)
+            self.camera_target_pub.publish(target_image_msg)
+
+        except CvBridgeError as e:
+            print(e)
+
+        #cv2.imshow("Image Window", cv_image)
+        #cv2.imshow("Target Image window", target_image)
+        #cv2.imshow("Avoid Image window", avoid_image)
+        #cv2.waitKey(5)
 
     '''
     Checks if the check_pose is located behind from the current pose
