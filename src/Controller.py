@@ -11,14 +11,27 @@ from cv_bridge import CvBridge, CvBridgeError
 from geometry_msgs.msg import PoseArray, PoseStamped
 from sensor_msgs.msg import Image
 
-# Constants
+# Topics
 CAMERA_AVOID_WAYPOINT_TOPIC = '/controller/camera/avoid'
 CAMERA_TOPIC = '/camera/color/image_raw'
 CAMERA_TARGET_WAYPOINT_TOPIC = '/controller/camera/target'
 CMD_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0'
+MAP_TOPIC = 'static_map'
 PLAN_TOPIC = '/planner_node/car_plan'
 POSE_TOPIC = '/sim_car_pose/pose'
+
+# Constants
+AVOID_COLOR_LOWER_BOUND = np.array([-9,89,192])
+AVOID_COLOR_UPPER_BOUND = np.array([11,109,272])
+CAMERA_FOV = 69.4 # horizontal FOV in degrees
 ERROR_BUFF_LENGTH = 10
+PLAN_IGNORE_THRESHOLD = 0.1 # metres
+TARGET_WAYPOINTS = np.array([[2600,660,0], [1880,440,0], [1435,545,0], [1250,460,0], [540,835,0]]) # pixels
+TARGET_COLOR_LOWER_BOUND = np.array([95,130,135])
+TARGET_COLOR_UPPER_BOUND = np.array([115,150,215])
+TARGET_REACH_Y_GOAL_THRESHOLD = 0.9 # threshold for target Y position to consider a point reached
+WAYPOINT_OFFSET_GAIN = 3.0
+WAYPOINT_REACTION_DISTANCE = 1.0 # metres
 
 '''
 Follows a given plan using constant velocity and PID control of the steering angle
@@ -39,29 +52,29 @@ class Controller:
                         to the error in translation
     '''
     def __init__(self, kp, ki, kd, speed=1.0, plan_lookahead=1, translation_weight=1.0, rotation_weight=1.0):
-        self.avoid_waypoint_position = None
-        self.avoid_waypoints = []
-        self.avoid_waypoint_thresholds = np.array([[-9,89,192],[11,109,272]])
-        self.check_camera = False
+        print("Getting map from service: ", MAP_TOPIC)
+        rospy.wait_for_service(MAP_TOPIC)
+        map_info = rospy.ServiceProxy(MAP_TOPIC, GetMap)().map.info
+        print("Received a map")
+
         self.cur_pose = None
         self.cv_bridge = CvBridge()
         self.desired_speed = speed
         self.error_buff = collections.deque(maxlen=ERROR_BUFF_LENGTH)
         self.error_buff.append((0.0, 0.0))
         self.errors = []
+        self.image_height = None
+        self.image_width = None
         self.kd = kd
         self.ki = ki
         self.kp = kp
         self.plan = []
-        self.plan_ignore_threshold = 0.1
         self.plan_lookahead = plan_lookahead
         self.rotation_weight = rotation_weight / (translation_weight + rotation_weight)
         self.speed = 0.0
         self.target_waypoint_position = None
-        self.target_waypoint_thresholds = np.array([[95,130,135],[115,150,215]])
-        self.target_waypoints = []
+        self.target_waypoints = Utils.map_to_world(TARGET_WAYPOINTS, map_info)[:,:2]
         self.translation_weight = translation_weight / (translation_weight + rotation_weight)
-        self.waypoint_reaction_distance = 2.0
 
         self.camera_avoid_pub = rospy.Publisher(CAMERA_AVOID_WAYPOINT_TOPIC, Image, queue_size=10)
         self.camera_sub = rospy.Subscriber(CAMERA_TOPIC, Image, self.__camera_cb)
@@ -71,16 +84,19 @@ class Controller:
         self.pose_sub = rospy.Subscriber(POSE_TOPIC, PoseStamped, self.__pose_cb)
 
     def __camera_cb(self, msg):
+        self.image_height = msg.height
+        self.image_width = msg.width
+
         try:
             cv_image = self.cv_bridge.imgmsg_to_cv2(msg, "bgr8")
         except CvBridgeError as e:
             print(e)
 
         hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
-        target_mask = cv2.inRange(hsv, self.target_waypoint_thresholds[0], self.target_waypoint_thresholds[1])
-        avoid_mask = cv2.inRange(hsv, self.avoid_waypoint_thresholds[0], self.avoid_waypoint_thresholds[1])
+        target_mask = cv2.inRange(hsv, TARGET_COLOR_LOWER_BOUND, TARGET_COLOR_UPPER_BOUND)
+        #avoid_mask = cv2.inRange(hsv, AVOID_COLOR_LOWER_BOUND, AVOID_COLOR_UPPER_BOUND)
         target_image = cv2.bitwise_and(cv_image, cv_image, mask=target_mask)
-        avoid_image = cv2.bitwise_and(cv_image, cv_image, mask=avoid_mask)
+        #avoid_image = cv2.bitwise_and(cv_image, cv_image, mask=avoid_mask)
 
         if target_mask[target_mask > 0].size > 0:
             m = cv2.moments(target_mask)
@@ -91,20 +107,19 @@ class Controller:
         else:
             self.target_waypoint_position = None
 
-        if avoid_mask[avoid_mask > 0].size > 0:
-            m = cv2.moments(avoid_mask)
-            x = int(m["m10"] / m["m00"])
-            y = int(m["m01"] / m["m00"])
-            self.avoid_waypoint_position = np.array([x,y])
-            cv2.circle(avoid_image, (x,y), 5, (255, 255, 255), -1)
-        else:
-            self.avoid_waypoint_position = None
+        # if avoid_mask[avoid_mask > 0].size > 0:
+        #     m = cv2.moments(avoid_mask)
+        #     x = int(m["m10"] / m["m00"])
+        #     y = int(m["m01"] / m["m00"])
+        #     self.avoid_waypoint_position = np.array([x,y])
+        #     cv2.circle(avoid_image, (x,y), 5, (255, 255, 255), -1)
+        # else:
+        #     self.avoid_waypoint_position = None
 
         try:
-            avoid_image_msg = self.cv_bridge.cv2_to_imgmsg(avoid_image, "bgr8")
+            #avoid_image_msg = self.cv_bridge.cv2_to_imgmsg(avoid_image, "bgr8")
             target_image_msg = self.cv_bridge.cv2_to_imgmsg(target_image, "bgr8")
-            print("Publishing frames")
-            self.camera_avoid_pub.publish(avoid_image_msg)
+            #self.camera_avoid_pub.publish(avoid_image_msg)
             self.camera_target_pub.publish(target_image_msg)
 
         except CvBridgeError as e:
@@ -206,13 +221,18 @@ class Controller:
             (False, E) - where E is the computed error, E can be np.nan
     '''
     def __compute_waypoint_error(self, cur_pose):
-        if not self.check_camera:
-            return (False, np.nan)
+        if self.target_waypoint_position is not None:
+            dist, degree_offset, selected_waypoint = self.__get_most_likely_waypoint(self.target_waypoints,
+                                                                                     cur_pose,
+                                                                                     self.target_waypoint_position)
 
-        waypoint_info = self.__find_waypoint()
-        #if waypoint_info is not None:
-        #    if self.__is_waypoint_within_distance(self.waypoint_reaction_distance):
-                # Compute error to get to visible waypoint and set error value here
+            if (selected_waypoint is not None) and (dist < WAYPOINT_REACTION_DISTANCE):
+
+                # Consider the waypoint reached if the Y position on the screen exceeds the goal threshold
+                if self.target_waypoint_position[1] > (TARGET_REACH_Y_GOAL_THRESHOLD * self.image_height):
+                    return (True, np.nan)
+                else:
+                    return (False, degree_offset * WAYPOINT_OFFSET_GAIN)
 
         return (False, np.nan)
 
@@ -256,19 +276,38 @@ class Controller:
         return a, b
 
     '''
-    Searches the camera frame for a waypoint marker
-    Returns: [location: (x,y), target: True/False] metadata info for waypoint or None if nothing was found
+    Finds the most likely waypoint based on known waypoint positions and the current pose of the robot
+        waypoints: Waypoints to match against as multiple numpy arrays of waypoints [x, y]
+        pose: Pose to filter points based on as a numpy array [x, y]
+        screen_position: The screen position of the detected marker in pixels as a numpy array [x, y]
+    Returns: (dist, degree_offset, waypoint) if a likely waypoint was found. Waypoint will be None if
+             a suitable waypoint could not be determined.
     '''
-    def __find_waypoint(self):
-        return None
+    def __get_most_likely_waypoint(self, waypoints, pose, screen_position):
 
-    '''
-    Matches waypoint_info to a waypoint based on closest cached avoid/target waypoints and determines if it is
-    within the specified distance to the robot
-    Returns: True/False
-    '''
-    def __is_waypoint_within_distance(self, waypoint_info, distance=2.0):
-        return False
+        # Get offset in degrees from robot to detected waypoint marker
+        degrees_per_pixel = CAMERA_FOV / self.image_width
+        degree_offset = (screen_position[0] - self.image_width / 2) * degrees_per_pixel
+
+        # Define bounding cone which the waypoint position needs to be in based on current pose
+        lower_bound = np.deg2rad(degree_offset - 10)
+        upper_bound = np.deg2rad(degree_offset + 10)
+        a_l, b_l = self.__define_line_points(pose, lower_bound)
+        a_u, b_u = self.__define_line_points(pose, upper_bound)
+
+        # Select closest waypoint which is within the bounding cone
+        selected_waypoint = None
+        min_dist = np.inf
+        for waypoint in waypoints:
+            to_right_of_lower = np.cross(waypoint-a_l, b_l-a_l) > 0
+            to_left_of_upper = np.cross(waypoint-a_u, b_u-a_u) < 0
+            if (to_right_of_lower and to_left_of_upper):
+                dist = np.linalg.norm(waypoint - pose[0:2])
+                if (dist < min_dist):
+                    selected_waypoint = waypoint
+                    min_dist = dist
+
+        return min_dist, np.deg2rad(degree_offset), selected_waypoint
 
     '''
     Callback for the path plan
@@ -286,7 +325,7 @@ class Controller:
         # Ignore provided plan if current location is to far from start location
         pose_delta = start_pose - self.cur_pose[0:2]
         distance = np.linalg.norm(pose_delta)
-        if distance > self.plan_ignore_threshold:
+        if distance > PLAN_IGNORE_THRESHOLD:
             print("Ignoring received plan, start position is to far from current")
             return
 
@@ -331,17 +370,6 @@ class Controller:
 
         # Send the control message
         self.cmd_pub.publish(ads)
-
-    def set_avoid_waypoints(self, waypoints):
-        self.check_camera = True
-        self.avoid_waypoints = waypoints
-
-    def set_waypoint_reaction_distance(self, distance):
-        self.waypoint_reaction_distance = distance
-
-    def set_target_waypoints(self, waypoints):
-        self.check_camera = True
-        self.target_waypoints = waypoints
 
 if __name__ == '__main__':
     rospy.init_node('controller', anonymous=True) # Initialize the node
