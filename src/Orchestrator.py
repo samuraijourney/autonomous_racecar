@@ -3,57 +3,94 @@
 import os
 import rospy
 import numpy as np
-from geometry_msgs.msg import Pose, PoseArray, PoseStamped
+import time
+import Utils
+from geometry_msgs.msg import Pose, PoseArray, PoseStamped, PoseWithCovarianceStamped, PoseWithCovariance
 
-PLAN_REQ_TOPIC = '/start_plan'
-LOCALIZATION_TOPIC = '/pf/viz/inferred_pose'
 CONTROLLER_DONE_TOPIC = '/controller/target_reached'
+LOCALIZATION_TOPIC = '/pf/viz/inferred_pose'
+MAP_TOPIC = 'static_map'
+START_TOPIC = '/initialpose'
+TARGET_TOPIC = 'move_base_simple/goal'
 
 class OrchestratorNode (object):
 
   def __init__(self):
-    self.curr_target = None
-    self.waypoints = [[2600, 660], [1880, 440], [1435, 545], [1250, 460], [540, 835]]
-    self.plan_req_pub = rospy.Publisher (PLAN_REQ_TOPIC, PoseArray, queue_size=10)
+    _, map_info = Utils.get_map(MAP_TOPIC)
 
-  def plan_next_wp (self, curr_pose):
-    if self.waypoints:
-      self.curr_target = self.waypoints[0]
+    self.curr_target = None
+    self.start_pose = None
+    self.waypoint_index = 0
+    self.waypoints = np.array([[2600, map_info.height - 660, 0],
+                               [1880, map_info.height - 440, 0],
+                               [1435, map_info.height - 545, 0],
+                               [1250, map_info.height - 460, 0],
+                               [540, map_info.height - 835, 0]],
+                               dtype='float64')
+
+    Utils.map_to_world(self.waypoints, map_info)
+
+    for i in range(1,len(self.waypoints)):
+      theta = np.arctan2(self.waypoints[i, 1] - self.waypoints[i-1, 1], self.waypoints[i, 0] - self.waypoints[i-1, 0])
+      self.waypoints[i-1, 2] = theta
+
+    self.waypoints[0,2] = np.deg2rad(100)
+    self.waypoints[-1,2] = np.pi
+
+    self.pose_cb(rospy.wait_for_message(LOCALIZATION_TOPIC, PoseStamped))
+
+    self.pose_sub = rospy.Subscriber(LOCALIZATION_TOPIC, PoseStamped, self.pose_cb)
+    self.start_pub = rospy.Publisher(START_TOPIC, PoseWithCovarianceStamped, queue_size=10)
+    self.target_pub = rospy.Publisher(TARGET_TOPIC, PoseStamped, queue_size=10)
+    self.target_reached_sub = rospy.Subscriber(CONTROLLER_DONE_TOPIC, PoseStamped, self.complete_wp_cb)
+
+    rospy.sleep(1)
+    self.plan_next_wp()
+
+  def complete_wp_cb (self, msg):
+    print("Path complete!")
+    self.waypoint_index += 1
+    if self.done():
+      print "Done!"
+    else:
+      print("Setting up new path...")
+      self.plan_next_wp()
+
+  def done (self):
+    return (self.waypoints.shape[0] == self.waypoint_index)
+
+  def plan_next_wp (self):
+    if not self.done():
+      self.curr_target = self.waypoints[self.waypoint_index]
 
       print "Heading towards:"
       print self.curr_target
 
-      req_arr = PoseArray ()
+      start_msg = PoseWithCovarianceStamped()
+      start_msg.header.frame_id = '/map'
+      start_msg.header.stamp = rospy.Time.now()
+      start_msg.pose = PoseWithCovariance()
+      start_msg.pose.pose = Pose()
+      start_msg.pose.pose.position.x = self.start_pose[0]
+      start_msg.pose.pose.position.y = self.start_pose[1]
+      start_msg.pose.pose.orientation = self.start_pose[2]
+      self.start_pub.publish(start_msg)
 
-      req_arr.header.frame_id = '/map'
-      req_arr.header.stamp = rospy.Time.now()
+      target_msg = PoseStamped()
+      target_msg.header.frame_id = '/map'
+      target_msg.header.stamp = rospy.Time.now()
+      target_msg.pose = Pose()
+      target_msg.pose.position.x = self.curr_target[0]
+      target_msg.pose.position.y = self.curr_target[1]
+      target_msg.pose.orientation = Utils.angle_to_quaternion(self.curr_target[2])
+      self.target_pub.publish(target_msg)
 
-      target_pose = Pose ()
-      target_pose.position.x = self.curr_target[0]
-      target_pose.position.y = self.curr_target[1]
-
-      req_arr.poses.append (curr_pose)
-      req_arr.poses.append (target_pose)
-
-      self.plan_req_pub.publish (req_arr)
-
-  def done (self):
-    return (len (self.waypoints) == 0)
-
-  def complete_wp (self, curr_pose):
-    self.waypoints.pop (0)
+  def pose_cb(self, msg):
+    self.start_pose = np.array([msg.pose.position.x,
+                                msg.pose.position.y,
+                                msg.pose.orientation])
 
 if __name__ == '__main__':
-  rospy.init_node ('orchestrator_node', anonymous=True)
-
-  on = OrchestratorNode ()
-
-  while not on.done ():
-    start_pose = rospy.wait_for_message (LOCALIZATION_TOPIC, PoseStamped)
-    on.plan_next_wp (start_pose.pose)
-    finish_pose = rospy.wait_for_message (CONTROLLER_DONE_TOPIC, PoseStamped)
-    on.complete_wp (finish_pose.pose)
-
-  print "Done!"
-
-  rospy.spin ()
+  rospy.init_node('orchestrator_node', anonymous=True)
+  on = OrchestratorNode()
+  rospy.spin()
