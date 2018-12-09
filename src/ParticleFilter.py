@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import rospy
+import MotionModel
 import numpy as np
 import time
 import Utils
@@ -179,20 +180,13 @@ class ParticleFilter():
       https://en.wikipedia.org/wiki/Mean_of_circular_quantities
   '''
   def expected_pose(self):
-    # YOUR CODE HERE
-    s = np.average(np.sin(self.particles[:,2]))
-    c = np.average(np.cos(self.particles[:,2]))
-    theta = np.arctan(s/c)
+    pose = np.zeros(3)
+    pose[0] = np.dot(self.particles[:,0], self.weights)
+    pose[1] = np.dot(self.particles[:,1], self.weights)
+    pose[2] = np.arctan2(np.sum(np.sin(self.particles[:,2])),
+                         np.sum(np.cos(self.particles[:,2])))
 
-    if c < 0:
-      theta += np.pi
-    elif (c > 0) and (s < 0):
-      theta += 2*np.pi
-
-    x = np.dot(self.weights, self.particles[:,0])
-    y = np.dot(self.weights, self.particles[:,1])
-
-    return np.array([x, y, theta])
+    return pose
 
   '''
     Callback for '/initialpose' topic. RVIZ publishes a message to this topic when you specify an initial pose
@@ -207,14 +201,10 @@ class ParticleFilter():
     # YOUR CODE HERE
     print("Received initial pose callback")
 
-    x_std = 0.5
-    y_std = 0.5
-    theta_std = 0.1
-
     pose = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y, Utils.quaternion_to_angle(msg.pose.pose.orientation)])
-    self.particles[:,0] = np.random.normal(pose[0], x_std, self.N_PARTICLES)
-    self.particles[:,1] = np.random.normal(pose[1], y_std, self.N_PARTICLES)
-    self.particles[:,2] = np.random.normal(pose[2], theta_std, self.N_PARTICLES)
+    self.particles[:,0] = np.random.normal(pose[0], MotionModel.KM_X_FIX_NOISE, self.N_PARTICLES)
+    self.particles[:,1] = np.random.normal(pose[1], MotionModel.KM_Y_FIX_NOISE, self.N_PARTICLES)
+    self.particles[:,2] = np.random.normal(pose[2], MotionModel.KM_THETA_FIX_NOISE, self.N_PARTICLES)
     self.weights[:] = 1 / float(self.particles.shape[0])
 
     self.state_lock.release()
