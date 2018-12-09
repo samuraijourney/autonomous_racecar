@@ -8,7 +8,7 @@ from threading import Lock
 from nav_msgs.srv import GetMap
 import rosbag
 import matplotlib.pyplot as plt
-import utils as Utils
+import Utils
 from sensor_msgs.msg import LaserScan
 from scipy.stats import norm
 

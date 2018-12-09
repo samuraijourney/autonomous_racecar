@@ -17,8 +17,8 @@ CAMERA_TOPIC = '/camera/color/image_raw'
 CAMERA_TARGET_WAYPOINT_TOPIC = '/controller/camera/target'
 CMD_TOPIC = '/vesc/high_level/ackermann_cmd_mux/input/nav_0'
 MAP_TOPIC = 'static_map'
-PLAN_TOPIC = '/planner_node/car_plan'
-POSE_TOPIC = '/sim_car_pose/pose'
+PLAN_TOPIC = '/plan'
+POSE_TOPIC = '/pf/viz/inferred_pose'
 TARGET_REACHED_TOPIC = '/controller/target_reached'
 
 # Constants

@@ -2,7 +2,7 @@
 
 import rospy
 import numpy as np
-import utils as Utils
+import Utils
 from std_msgs.msg import Float64
 from threading import Lock
 from nav_msgs.msg import Odometry

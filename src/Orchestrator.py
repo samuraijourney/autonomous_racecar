@@ -1,15 +1,13 @@
 #!/usr/bin/env python
 
 import os
-import rospy 
+import rospy
 import numpy as np
 from geometry_msgs.msg import Pose, PoseArray, PoseStamped
 
-
-PLAN_REQ_TOPIC = '/start_plan' 
-LOCALIZATION_TOPIC = '/curr_pose' 
-CONTROLLER_DONE_TOPIC = '/wp_reached' 
-
+PLAN_REQ_TOPIC = '/start_plan'
+LOCALIZATION_TOPIC = '/pf/viz/inferred_pose'
+CONTROLLER_DONE_TOPIC = '/controller/target_reached'
 
 class OrchestratorNode (object):
 
@@ -44,7 +42,7 @@ class OrchestratorNode (object):
 
   def complete_wp (self, curr_pose):
     self.waypoints.pop (self.curr_target)
-    
+
 if __name__ == '__main__':
   rospy.init_node ('orchestrator_node', anonymous=True)
 
@@ -52,10 +50,10 @@ if __name__ == '__main__':
 
   while not on.done ():
     start_pose = rospy.wait_for_message (LOCALIZATION_TOPIC, PoseStamped)
-    on.plan_next_wp (start_pose)
+    on.plan_next_wp (start_pose.pose)
     finish_pose = rospy.wait_for_message (CONTROLLER_DONE_TOPIC, PoseStamped)
-    on.complete_wp (finish_pose)
+    on.complete_wp (finish_pose.pose)
 
   print "Done!"
 
-  rospy.spin ()  
+  rospy.spin ()
