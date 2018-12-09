@@ -38,21 +38,21 @@ def fatten_map (map, radius):
   for y in range (radius, map.info.height - radius):
     for x in range (radius, map.info.width - radius):
       if map.data[x + y * map.info.width] == 0:
-        if (map.data[(x - 1) + y * map.info.width] > 0 and map.data[(x - 1) + y * map.info.width] != 92):
-          for x2 in range (x, radius):
-            data[x2 + y * map.info.width] = 92
+        if (map.data[(x - 1) + y * map.info.width] > 0 and map.data[(x - 1) + y * map.info.width] != 50):
+          for x2 in range (x, x + radius):
+            data[x2 + y * map.info.width] = 50
 
-        if (map.data[(x + 1) + y * map.info.width] > 0 and map.data[(x + 1) + y * map.info.width] != 92):
+        if (map.data[(x + 1) + y * map.info.width] > 0 and map.data[(x + 1) + y * map.info.width] != 50):
           for x2 in range (x - radius, x):
-            data[x2 + y * map.info.width] = 92
+            data[x2 + y * map.info.width] = 50
 
-        if (map.data[x + (y - 1) * map.info.width] > 0 and map.data[x + (y - 1) * map.info.width] != 92):
-          for y2 in range (y, radius):
-            data[x + y2 * map.info.width] = 92
+        if (map.data[x + (y - 1) * map.info.width] > 0 and map.data[x + (y - 1) * map.info.width] != 50):
+          for y2 in range (y, y + radius):
+            data[x + y2 * map.info.width] = 50
 
-        if (map.data[x + (y + 1) * map.info.width] > 0 and map.data[x + (y + 1) * map.info.width] != 92):
+        if (map.data[x + (y + 1) * map.info.width] > 0 and map.data[x + (y + 1) * map.info.width] != 50):
           for y2 in range (y - radius, y):
-            data[x + y2 * map.info.width] = 92
+            data[x + y2 * map.info.width] = 50
       else:
         data[x + y * map.info.width] = 100
 
@@ -74,7 +74,7 @@ class PlannerNode(object):
 
     print("Getting map from service: " + map_service_name)
 
-    self.map = fatten_map (self.map_msg, 30)
+    self.map = fatten_map (self.map_msg, 20)
     self.map_pub.publish (self.map)
 
     print("Done beefening map")
