@@ -20,7 +20,7 @@ In:
 Out:
     The modified Occupancy grid
 '''
-def fatten_map (map, radius):
+def fatten_map (map, radius, radius2=25):
   new_map = OccupancyGrid ()
   new_map.info = map.info
   new_map.header = map.header
@@ -31,28 +31,28 @@ def fatten_map (map, radius):
     [1520, map.info.height - 435], [1130, map.info.height - 400], [670, map.info.height - 840]]
 
   for waypoint in waypoints:
-    for x in range (waypoint[0] - radius, waypoint[0] + radius):
-      for y in range (waypoint[1] - radius, waypoint[1] + radius):
-        data[x + y * map.info.width] = 100
+    for x in range (waypoint[0] - radius2, waypoint[0] + radius2):
+      for y in range (waypoint[1] - radius2, waypoint[1] + radius2):
+        data[x + y * map.info.width] = 92
 
   for y in range (radius, map.info.height - radius):
     for x in range (radius, map.info.width - radius):
       if map.data[x + y * map.info.width] == 0:
-        if (map.data[(x - 1) + y * map.info.width] > 0 and map.data[(x - 1) + y * map.info.width] != 50):
+        if (map.data[(x - 1) + y * map.info.width] > 0 and map.data[(x - 1) + y * map.info.width] != 75):
           for x2 in range (x, x + radius):
-            data[x2 + y * map.info.width] = 50
+            data[x2 + y * map.info.width] = 75
 
-        if (map.data[(x + 1) + y * map.info.width] > 0 and map.data[(x + 1) + y * map.info.width] != 50):
+        if (map.data[(x + 1) + y * map.info.width] > 0 and map.data[(x + 1) + y * map.info.width] != 75):
           for x2 in range (x - radius, x):
-            data[x2 + y * map.info.width] = 50
+            data[x2 + y * map.info.width] = 75
 
-        if (map.data[x + (y - 1) * map.info.width] > 0 and map.data[x + (y - 1) * map.info.width] != 50):
+        if (map.data[x + (y - 1) * map.info.width] > 0 and map.data[x + (y - 1) * map.info.width] != 75):
           for y2 in range (y, y + radius):
-            data[x + y2 * map.info.width] = 50
+            data[x + y2 * map.info.width] = 75
 
-        if (map.data[x + (y + 1) * map.info.width] > 0 and map.data[x + (y + 1) * map.info.width] != 50):
+        if (map.data[x + (y + 1) * map.info.width] > 0 and map.data[x + (y + 1) * map.info.width] != 75):
           for y2 in range (y - radius, y):
-            data[x + y2 * map.info.width] = 50
+            data[x + y2 * map.info.width] = 75
       else:
         data[x + y * map.info.width] = 100
 
