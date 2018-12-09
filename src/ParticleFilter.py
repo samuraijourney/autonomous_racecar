@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import rospy
+import MotionModel
 import numpy as np
 import time
 import Utils
@@ -207,14 +208,10 @@ class ParticleFilter():
     # YOUR CODE HERE
     print("Received initial pose callback")
 
-    x_std = 0.5
-    y_std = 0.5
-    theta_std = 0.1
-
     pose = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y, Utils.quaternion_to_angle(msg.pose.pose.orientation)])
-    self.particles[:,0] = np.random.normal(pose[0], x_std, self.N_PARTICLES)
-    self.particles[:,1] = np.random.normal(pose[1], y_std, self.N_PARTICLES)
-    self.particles[:,2] = np.random.normal(pose[2], theta_std, self.N_PARTICLES)
+    self.particles[:,0] = np.random.normal(pose[0], MotionModel.KM_X_FIX_NOISE, self.N_PARTICLES)
+    self.particles[:,1] = np.random.normal(pose[1], MotionModel.KM_Y_FIX_NOISE, self.N_PARTICLES)
+    self.particles[:,2] = np.random.normal(pose[2], MotionModel.KM_THETA_FIX_NOISE, self.N_PARTICLES)
     self.weights[:] = 1 / float(self.particles.shape[0])
 
     self.state_lock.release()
