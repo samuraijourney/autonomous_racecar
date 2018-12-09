@@ -249,18 +249,15 @@ class Controller:
     def __compute_steering_angle(self, error):
         now = rospy.Time.now().to_sec() # Get the current time
 
-        # Compute the derivative error using the passed error, the current time,
-        # the most recent error stored in self.error_buff, and the most recent time
-        # stored in self.error_buff
-        last_error = self.error_buff.pop()
-        deriv_error = (error - last_error[0]) / (now - last_error[1])
+        deriv_error = 0.0
+        if len(self.error_buff) >= 1:
+            deriv_error = (error - self.error_buff[-1][0])/(now-self.error_buff[-1][1])
 
         # Add the current error to the buffer
         self.error_buff.append((error, now))
-
-        # Compute the integral error by applying rectangular integration to the elements
-        # of self.error_buff: https://chemicalstatistician.wordpress.com/2014/01/20/rectangular-integration-a-k-a-the-midpoint-rule/
-        integ_error = (now - last_error[1]) * (error + last_error[0]) / 2.0
+        integ_error = 0.0
+        for i in xrange(len(self.error_buff)-1):
+            integ_error += 0.5*(self.error_buff[i][0]+self.error_buff[i+1][0])*(self.error_buff[i+1][1]-self.error_buff[i][1])
 
         # Compute the steering angle as the sum of the pid errors
         #print("Error: " + str(error) + ", Integ Error: " + str(integ_error) + ", Deriv Error: " + str(deriv_error))
