@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import rospy
-import MotionModel
 import numpy as np
 import time
 import Utils
@@ -16,7 +15,7 @@ from nav_msgs.msg import Odometry
 
 from ReSample import ReSampler
 from SensorModel import SensorModel
-from MotionModel import KinematicMotionModel
+from MotionModel import OdometryMotionModel, KinematicMotionModel
 
 MAP_TOPIC = "static_map"
 PUBLISH_PREFIX = '/pf/viz'
@@ -32,6 +31,8 @@ class ParticleFilter():
   Initializes the particle filter
     n_particles: The number of particles
     n_viz_particles: The number of particles to visualize
+    motion_model: Which type of motion model to use
+    odometry_topic: The topic containing odometry information
     motor_state_topic: The topic containing motor state information
     servo_state_topic: The topic containing servo state information
     scan_topic: The topic containing laser scans
@@ -45,7 +46,7 @@ class ParticleFilter():
     steering_angle_to_servo_gain: Gain conversion param from servo position to steering angle
     car_length: The length of the car
   '''
-  def __init__(self, n_particles, n_viz_particles,
+  def __init__(self, n_particles, n_viz_particles, motion_model, odometry_topic,
                motor_state_topic, servo_state_topic, scan_topic, laser_ray_step,
                exclude_max_range_rays, max_range_meters, resample_type,
                speed_to_erpm_offset, speed_to_erpm_gain, steering_angle_to_servo_offset,
@@ -78,8 +79,6 @@ class ParticleFilter():
     # Globally initialize the particles
     self.initialize_global()
 
-    print('Globals initialized')
-
     # Publish particle filter state
     self.pub_tf = tf.TransformBroadcaster() # Used to create a tf between the map and the laser for visualization
     self.pose_pub      = rospy.Publisher(PUBLISH_PREFIX + "/inferred_pose", PoseStamped, queue_size = 1) # Publishes the expected pose
@@ -87,25 +86,36 @@ class ParticleFilter():
     self.pub_laser     = rospy.Publisher(PUBLISH_PREFIX + "/scan", LaserScan, queue_size = 1) # Publishes the most recent laser scan
     self.pub_odom      = rospy.Publisher(PUBLISH_PREFIX + "/odom", Odometry, queue_size = 1) # Publishes the path of the car
 
+    ''' HACK VIEW INITIAL DISTRIBUTION'''
+    '''
+    self.N_VIZ_PARTICLES = 1000
+    while not rospy.is_shutdown():
+      self.visualize()
+      rospy.sleep(0.2)
+    '''
+
     self.RESAMPLE_TYPE = resample_type # Whether to use naiive or low variance sampling
     self.resampler = ReSampler(self.particles, self.weights, self.state_lock)  # An object used for resampling
-
-    print('Resampler started')
 
     # An object used for applying sensor model
     self.sensor_model = SensorModel(scan_topic, laser_ray_step, exclude_max_range_rays,
                                     max_range_meters, map_msg, self.particles, self.weights,
                                     self.state_lock)
 
-    print('Sensor model started')
-
-    # An object used for applying kinematic motion model
-    self.motion_model = KinematicMotionModel(motor_state_topic, servo_state_topic,
-                                             speed_to_erpm_offset, speed_to_erpm_gain,
-                                             steering_angle_to_servo_offset, steering_angle_to_servo_gain,
-                                             car_length, self.particles, self.state_lock)
-
-    print('Kinematic motion model started')
+    self.MOTION_MODEL_TYPE = motion_model # Whether to use the odometry or kinematics based motion model
+    if self.MOTION_MODEL_TYPE == "kinematic":
+      # An object used for applying kinematic motion model
+      self.motion_model = KinematicMotionModel(motor_state_topic, servo_state_topic,
+                                               speed_to_erpm_offset, speed_to_erpm_gain,
+                                               steering_angle_to_servo_offset, steering_angle_to_servo_gain,
+                                               car_length, self.particles, self.state_lock)
+    elif self.MOTION_MODEL_TYPE == "odometry":
+      # An object used for applying odometry motion model
+      self.motion_model = OdometryMotionModel(odometry_topic,self.particles,
+                                              self.state_lock)
+    else:
+      print "Unrecognized motion model: "+ self.MOTION_MODEL_TYPE
+      assert(False)
 
     # Subscribe to the '/initialpose' topic. Publised by RVIZ. See clicked_pose_cb function in this file for more info
     self.pose_sub  = rospy.Subscriber("/initialpose", PoseWithCovarianceStamped, self.clicked_pose_cb, queue_size=1)
@@ -113,40 +123,34 @@ class ParticleFilter():
     print('Initialization complete')
 
   '''
-    Initialize the particles as uniform samples across the in-bounds regions of
-    the map
+    Initialize the particles to cover the map
   '''
   def initialize_global(self):
     self.state_lock.acquire()
 
-    # Use self.permissible_region to get in-bounds states
-    # Uniformally sample from in-bounds regions
-    # Convert map samples (which are in pixels) to world samples (in meters/radians)
-    #   Take a look at utils.py
-    # Update particles in place
-    # Update weights in place so that all particles have the same weight and the
-    # sum of the weights is one.
-    # YOUR CODE HERE
-    step = int(self.permissible_region[self.permissible_region == 1].size / self.N_PARTICLES)
-    m = 0
-    k = 0
-    skip = 0
-    while k < self.permissible_region.size:
-      x = np.mod(k, self.map_info.width)
-      y = int(k / self.map_info.width)
-      k += 1
-      if self.permissible_region[y, x] == 0:
-        continue
-
-      if skip == 0:
-        self.particles[m,:] = np.array([x, y, 0])
-        m += 1
-        skip = step
-      else:
-        skip -= 1
+    # Get in-bounds locations
+    permissible_x, permissible_y = np.where(self.permissible_region == 1)
 
 
-    Utils.map_to_world(self.particles, self.map_info)
+    angle_step = 4 # The number of particles at each location, each with different rotation
+    permissible_step = angle_step*len(permissible_x)/self.particles.shape[0] # The sample interval for permissible states
+    indices = np.arange(0, len(permissible_x), permissible_step)[:(self.particles.shape[0]/angle_step)] # Indices of permissible states to use
+    permissible_states = np.zeros((self.particles.shape[0],3)) # Proxy for the new particles
+
+    # Loop through permissible states, each iteration drawing particles with
+    # different rotation
+    for i in xrange(angle_step):
+      permissible_states[i*(self.particles.shape[0]/angle_step):(i+1)*(self.particles.shape[0]/angle_step),0] = permissible_y[indices]
+      permissible_states[i*(self.particles.shape[0]/angle_step):(i+1)*(self.particles.shape[0]/angle_step),1] = permissible_x[indices]
+      permissible_states[i*(self.particles.shape[0]/angle_step):(i+1)*(self.particles.shape[0]/angle_step),2] = i*(2*np.pi / angle_step)
+
+    # Transform permissible states to be w.r.t world
+    Utils.map_to_world(permissible_states, self.map_info)
+
+    # Reset particles and weights
+    self.particles[:,:] = permissible_states[:,:]
+    self.weights[:] = 1.0 / self.particles.shape[0]
+
     self.state_lock.release()
 
   '''
@@ -174,39 +178,30 @@ class ParticleFilter():
       self.pub_tf.sendTransform((pose[0],pose[1],0),tf.transformations.quaternion_from_euler(0,0,pose[2]), stamp , "/laser", "/map")
 
   '''
-    Returns a 3 element numpy array representing the expected pose given the
-    current particles and weights
-    Uses weighted cosine and sine averaging to more accurately compute average theta
-      https://en.wikipedia.org/wiki/Mean_of_circular_quantities
+    Returns the expected pose given the current particles and weights
+    Uses cosine and sine averaging to more accurately compute average theta
   '''
   def expected_pose(self):
-    pose = np.zeros(3)
-    pose[0] = np.dot(self.particles[:,0], self.weights)
-    pose[1] = np.dot(self.particles[:,1], self.weights)
-    pose[2] = np.arctan2(np.sum(np.sin(self.particles[:,2])),
-                         np.sum(np.cos(self.particles[:,2])))
-
-    return pose
+    cosines = np.cos(self.particles[:,2])
+    sines = np.sin(self.particles[:,2])
+    theta = np.arctan2(np.dot(sines,self.weights),np.dot(cosines, self.weights))
+    position = np.dot(self.particles[:,0:2].transpose(), self.weights)
+    return np.array((position[0], position[1], theta),dtype=np.float)
 
   '''
-    Callback for '/initialpose' topic. RVIZ publishes a message to this topic when you specify an initial pose
-    using the '2D Pose Estimate' button
+    Callback for '/initialpose' topic. RVIZ publishes a message to this topic when you specify an initial pose using its GUI
     Reinitialize particles and weights according to the received initial pose
+    Applies Gaussian noise to each particle's pose
   '''
   def clicked_pose_cb(self, msg):
     self.state_lock.acquire()
-    # Sample particles from a gaussian centered around the received pose
-    # Updates the particles in place
-    # Updates the weights to all be equal, and sum to one
-    # YOUR CODE HERE
-    print("Received initial pose callback")
-
-    pose = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y, Utils.quaternion_to_angle(msg.pose.pose.orientation)])
-    self.particles[:,0] = np.random.normal(pose[0], MotionModel.KM_X_FIX_NOISE, self.N_PARTICLES)
-    self.particles[:,1] = np.random.normal(pose[1], MotionModel.KM_Y_FIX_NOISE, self.N_PARTICLES)
-    self.particles[:,2] = np.random.normal(pose[2], MotionModel.KM_THETA_FIX_NOISE, self.N_PARTICLES)
-    self.weights[:] = 1 / float(self.particles.shape[0])
-
+    pose = msg.pose.pose
+    print "SETTING POSE"
+    print pose
+    self.weights[:] = 1.0 / float(self.particles.shape[0])
+    self.particles[:,0] = pose.position.x + np.random.normal(loc=0.0,scale=0.5,size=self.particles.shape[0])
+    self.particles[:,1] = pose.position.y + np.random.normal(loc=0.0,scale=0.5,size=self.particles.shape[0])
+    self.particles[:,2] = Utils.quaternion_to_angle(pose.orientation) + np.random.normal(loc=0.0,scale=0.4,size=self.particles.shape[0])
     self.state_lock.release()
 
   '''
@@ -269,6 +264,8 @@ if __name__ == '__main__':
 
   n_particles = int(rospy.get_param("~n_particles")) # The number of particles
   n_viz_particles = int(rospy.get_param("~n_viz_particles")) # The number of particles to visualize
+  motion_model = rospy.get_param("~motion_model", "kinematic") # Which type of motion model to use
+  odometry_topic = rospy.get_param("~odometry_topic", "/vesc/odom") # The topic containing odometry information
   motor_state_topic = rospy.get_param("~motor_state_topic", "/vesc/sensors/core") # The topic containing motor state information
   servo_state_topic = rospy.get_param("~servo_state_topic", "/vesc/sensors/servo_position_command") # The topic containing servo state information
   scan_topic = rospy.get_param("~scan_topic", "/scan") # The topic containing laser scans
@@ -284,7 +281,7 @@ if __name__ == '__main__':
   car_length = float(rospy.get_param("/car_kinematics/car_length", 0.33)) # The length of the car
 
   # Create the particle filter
-  pf = ParticleFilter(n_particles, n_viz_particles,
+  pf = ParticleFilter(n_particles, n_viz_particles, motion_model, odometry_topic,
                       motor_state_topic, servo_state_topic, scan_topic, laser_ray_step,
                       exclude_max_range_rays, max_range_meters, resample_type,
                       speed_to_erpm_offset, speed_to_erpm_gain, steering_angle_to_servo_offset,
