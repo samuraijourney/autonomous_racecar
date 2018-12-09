@@ -68,7 +68,6 @@ class ReSampler:
         if i == M: i -= 1
         c += self.weights[i]
       self.particles[m,:] = self.particles[i,:]
-    self.weights[:] = 1 / float(M)
 
     self.state_lock.release()
 
