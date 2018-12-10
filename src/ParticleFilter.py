@@ -243,7 +243,7 @@ class ParticleFilter():
         self.publish_particles(self.particles)
 
     if self.pub_laser.get_num_connections() > 0 and isinstance(self.sensor_model.last_laser, LaserScan):
-      self.sensor_model.last_laser.header.frame_id = "/laser"
+      self.sensor_model.last_laser.header.frame_id = "/map"
       self.sensor_model.last_laser.header.stamp = rospy.Time.now()
       self.pub_laser.publish(self.sensor_model.last_laser)
     self.state_lock.release()

@@ -2,7 +2,6 @@
 
 import rospy
 import numpy as np
-import bresenham
 
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker
@@ -176,21 +175,9 @@ def world_to_map(poses, map_info):
 
     # Store the x coordinates since they will be overwritten
     temp = np.copy(poses[:,0])
-    poses[:,0] = int(c*poses[:,0] - s*poses[:,1])
-    poses[:,1] = int(s*temp       + c*poses[:,1])
+    poses[:,0] = c*poses[:,0] - s*poses[:,1]
+    poses[:,1] = s*temp       + c*poses[:,1]
     poses[:,2] += angle
-
-'''
-Generate a path of nodes between provided start and end point using
-Bresenham's line algorithm
-In:
-    start: Source node as list of x, y points
-    end: Target node as list of x, y points
-Out:
-    List of generated path
-'''
-def bresenham_get_line (start, end):
-    return list (bresenham.bresenham (start[0], start[1], end[0], end[1]))
 
 '''
 Compute Euclidean distance between two nodes

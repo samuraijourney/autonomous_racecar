@@ -30,8 +30,8 @@ PLAN_IGNORE_THRESHOLD = 1.0 # metres
 TARGET_WAYPOINTS = np.array([[2600,660,0], [1880,440,0], [1435,545,0], [1250,460,0], [540,835,0]], dtype='float64') # pixels
 TARGET_COLOR_LOWER_BOUND = np.array([95,130,135])
 TARGET_COLOR_UPPER_BOUND = np.array([115,150,215])
-TARGET_REACH_Y_GOAL_THRESHOLD = 0.9 # threshold for target Y position to consider a point reached
-WAYPOINT_OFFSET_GAIN = 3.0
+TARGET_REACH_Y_GOAL_THRESHOLD = 0.90 # threshold for target Y position to consider a point reached
+WAYPOINT_OFFSET_GAIN = 0.5
 WAYPOINT_REACTION_DISTANCE = 1.0 # metres
 
 '''
@@ -226,18 +226,18 @@ class Controller:
                                                                                      cur_pose,
                                                                                      self.target_waypoint_position)
 
-            if (selected_waypoint is not None):
-                if dist < WAYPOINT_REACTION_DISTANCE:
+            #if (selected_waypoint is not None):
+            #    if dist < WAYPOINT_REACTION_DISTANCE:
 
-                    # Consider the waypoint reached if the Y position on the screen exceeds the goal threshold
-                    if self.target_waypoint_position[1] > (TARGET_REACH_Y_GOAL_THRESHOLD * self.image_height):
-                        return (True, np.nan)
-                    else:
-                        return (False, degree_offset * WAYPOINT_OFFSET_GAIN)
-                else:
-                    print("Suitable waypoint found but it is to far away, ignoring it")
+             # Consider the waypoint reached if the Y position on the screen exceeds the goal threshold
+            if self.target_waypoint_position[1] > (TARGET_REACH_Y_GOAL_THRESHOLD * self.image_height):
+                return (True, np.nan)
             else:
-                print("No suitable waypoint could be found based on current position")
+                return (False, -degree_offset * WAYPOINT_OFFSET_GAIN)
+            #else:
+            #    print("Suitable waypoint found but it is to far away, ignoring it")
+            #else:
+            #    print("No suitable waypoint could be found based on current position")
 
         return (False, np.nan)
 
@@ -355,17 +355,15 @@ class Controller:
             error = 0.0
 
         self.errors.append(error)
-        if (self.speed == self.desired_speed) and (success == True):
+        if (self.speed is not 0.0) and (len(self.plan) != 0) and (success == True):
             ps = PoseStamped()
             ps.header = Utils.make_header("map")
             ps.pose.position.x = cur_pose[0]
             ps.pose.position.y = cur_pose[1]
             ps.pose.orientation = Utils.angle_to_quaternion(cur_pose[2])
             self.target_reached_pub.publish(ps)
-            print("Plan complete!")
-
-        if success:
             self.speed = 0.0
+            print("Plan complete!")
 
         delta = self.__compute_steering_angle(error)
 
@@ -382,12 +380,12 @@ class Controller:
 if __name__ == '__main__':
     rospy.init_node('controller', anonymous=True) # Initialize the node
 
-    plan_lookahead = 1
+    plan_lookahead = 3
     translation_weight = 1.0
     rotation_weight = 1.0
-    kp = 2.0
+    kp = 0.5
     ki = 0.0
-    kd = 0.0
+    kd = 0.1
     speed = 1.0
 
     controller = Controller(kp,

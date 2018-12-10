@@ -28,14 +28,22 @@ class OrchestratorNode (object):
                                [540, map_info.height - 835, 0]],
                                dtype='float64')
 
+    self.start = np.array([[2500, map_info.height - 640, 0]], dtype='float64')
+
     Utils.map_to_world(self.waypoints, map_info)
+    Utils.map_to_world(self.start, map_info)
+    self.start = self.start[0,:]
+    self.start[2] = np.deg2rad(-15)
 
     for i in range(1,len(self.waypoints)):
       theta = np.arctan2(self.waypoints[i, 1] - self.waypoints[i-1, 1], self.waypoints[i, 0] - self.waypoints[i-1, 0])
       self.waypoints[i-1, 2] = theta
 
-    self.waypoints[0,2] = np.deg2rad(100)
-    self.waypoints[-1,2] = np.pi
+    self.waypoints[0,2] = np.deg2rad(-15)
+    self.waypoints[1,2] = np.deg2rad(180)
+    self.waypoints[2,2] = np.deg2rad(135)
+    self.waypoints[3,2] = np.deg2rad(170)
+    self.waypoints[4,2] = np.deg2rad(-135)
 
     self.pose_cb(rospy.wait_for_message(LOCALIZATION_TOPIC, PoseStamped))
 
@@ -45,6 +53,17 @@ class OrchestratorNode (object):
     self.target_reached_sub = rospy.Subscriber(CONTROLLER_DONE_TOPIC, PoseStamped, self.complete_wp_cb)
 
     rospy.sleep(1)
+    start_msg = PoseWithCovarianceStamped()
+    start_msg.header.frame_id = '/map'
+    start_msg.header.stamp = rospy.Time.now()
+    start_msg.pose = PoseWithCovariance()
+    start_msg.pose.pose = Pose()
+    start_msg.pose.pose.position.x = self.start[0]
+    start_msg.pose.pose.position.y = self.start[1]
+    start_msg.pose.pose.orientation = Utils.angle_to_quaternion(self.start[2])
+    self.start_pub.publish(start_msg)
+    rospy.sleep(2)
+
     self.plan_next_wp()
 
   def complete_wp_cb (self, msg):
